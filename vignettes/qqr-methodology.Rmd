@@ -1,0 +1,1272 @@
+---
+title: "Quantile-on-Quantile Regression in the qqr Package"
+author: |
+  Collins Baffour Kyei<sup>a,b,*</sup><br>
+  William Godfred Cantah<sup>b</sup><br>
+  Peterson Owusu Junior<sup>c</sup><br><br>
+
+  <sup>a</sup> Department of Economic Studies, University of Cape Coast, Cape Coast, Ghana<br>
+  <sup>b</sup> Department of Data Science and Economic Policy, University of Cape Coast, Cape Coast, Ghana<br>
+  <sup>c</sup> Department of Finance, University of Cape Coast, Cape Coast, Ghana<br><br>
+
+  <sup>*</sup> Corresponding author email: <code>collinskb536@gmail.com</code>
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  rmarkdown::html_vignette:
+    css: "qqr-vignette.css"
+    toc: true
+    toc_depth: 3
+    number_sections: true
+geometry: margin=2.5cm
+fontsize: 12pt
+vignette: >
+  %\VignetteIndexEntry{Quantile-on-Quantile Regression in the qqr Package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+^a^ Department of Economic Studies, University of Cape Coast, Cape Coast, Ghana  
+^b^ Department of Data Science and Economic Policy, University of Cape Coast, Cape Coast, Ghana  
+^c^ Department of Finance, University of Cape Coast, Cape Coast, Ghana  
+
+\*Corresponding author email: collinskb536@gmail.com
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse  = TRUE,
+  comment   = "#>",
+  fig.align = "center"
+)
+
+if (requireNamespace("qqr", quietly = TRUE)) {
+  library(qqr)
+} else {
+  message("Package 'qqr' is not installed; vignette code chunks will not be evaluated.")
+  knitr::opts_chunk$set(eval = FALSE)
+}
+```
+
+
+# 1. Motivation and overview
+
+Classical quantile regression (QR) models the conditional quantiles of a dependent variable as linear functions of predictors, which allows the researcher to study heterogeneous effects across the distribution of the response rather than only at the mean (Koenker and Bassett, 1978; Koenker and Hallock, 2001; Koenker, 2005). In its standard formulation, however, QR treats the regressors as fixed conditioning variables and delivers coefficients that vary with the quantile index of the *response* but not with the quantile index of the *regressor*.
+
+In many empirical applications this is restrictive. The effect of a regressor on the outcome may differ not only across the conditional quantiles of the dependent variable but also across the distribution of the regressor itself. For example, the impact of very large shocks in a financial variable on the upper tail of a risk measure may differ from the impact of more moderate movements around its centre, and those differences may be asymmetric between the lower and upper tails of the outcome distribution.
+
+Quantile-on-quantile regression (QQR), introduced by Sim and Zhou (2015), addresses this limitation by modelling the effect of specific quantiles of a regressor on specific quantiles of a dependent variable. Instead of returning a one-dimensional curve of slopes indexed only by the outcome quantile, QQR yields a two-dimensional surface of slopes indexed jointly by quantiles of the regressor and quantiles of the response. This allows the researcher to investigate, for example, how the effect of extreme realisations of the regressor compares with the effect of more central realisations and how that comparison varies across the outcome distribution. QQR has been used in several recent empirical studies, including applications in energy and environmental economics and finance (Shahzad et al., 2020; Wu, 2023).
+
+The `qqr` package implements a practical version of QQR based on local linear quantile regression. Conceptually, the package carries out a sequence of weighted QR fits, each centred at a grid point in the support of a designated *quantile regressor*. At each grid point and for each conditional quantile level of the dependent variable, a local linear QR is estimated using kernel weights that emphasise observations whose regressor values lie close to the grid location. The resulting estimates are stored as three dimensional coefficient and p value surfaces for the intercept, the quantile regressor and any additional control variables.
+
+This vignette explains the underlying statistical model, the local estimation strategy, automatic bandwidth selection, and how the exported functions in `qqr` map to the mathematical objects defined by the QQR framework. Throughout, the dependent variable is denoted by \(Y\), the designated quantile regressor by \(X\), and additional controls by a vector \(W\).
+
+# 2. Classical quantile regression
+
+## 2.1 Conditional quantiles
+
+Let \((Y_t, X_t, W_t)\) for \(t = 1,\ldots,T\) be independent observations from the joint distribution of a scalar dependent variable \(Y\), a scalar regressor \(X\), and a vector of controls \(W\). For a quantile index \(\tau \in (0,1)\), the conditional \(\tau\)-quantile of \(Y\) given \(X = x\) and \(W = w\) is defined as
+\[
+Q_Y(\tau \mid X = x, W = w)
+=
+\inf \{ y \in \mathbb{R} : F_{Y \mid X,W}(y \mid x,w) \ge \tau \},
+\]
+where \(F_{Y \mid X,W}(\cdot \mid x,w)\) is the conditional distribution function of \(Y\) given \((X,W) = (x,w)\) (Koenker and Bassett, 1978).
+
+A linear quantile regression model specifies this conditional quantile as
+\[
+Q_Y(\tau \mid X = x, W = w)
+=
+\beta_0(\tau) + \beta_1(\tau)\, x + \gamma(\tau)^{\top} w,
+\]
+where \(\beta_0(\tau)\) is an intercept, \(\beta_1(\tau)\) is the slope on the regressor \(X\), and \(\gamma(\tau)\) is a vector of slopes on the controls. Collecting the coefficients in the vector
+\[
+\beta(\tau)
+=
+\big( \beta_0(\tau), \beta_1(\tau), \gamma(\tau)^{\top} \big)^{\top},
+\]
+the standard QR estimator \(\hat\beta(\tau)\) solves
+\[
+\hat\beta(\tau)
+=
+\arg\min_{\beta}
+\sum_{t = 1}^{T}
+\rho_{\tau} \big( Y_t - Z_t^{\top} \beta \big),
+\]
+where \(Z_t = (1, X_t, W_t^{\top})^{\top}\) is the vector of regressors and
+\[
+\rho_{\tau}(u)
+=
+u \, \big( \tau - \mathbf{1}\{ u < 0 \} \big)
+\]
+is the check loss function (Koenker, 2005).
+
+The family of quantile specific slopes \(\{ \beta_1(\tau), \gamma(\tau) : \tau \in (0,1)\}\) describes how the effect of the regressors varies across the distribution of the dependent variable. However, these slopes are functions only of \(\tau\) and do not vary explicitly with the distribution of the regressor \(X\).
+
+## 2.2 Limitations for distributional heterogeneity in regressors
+
+In many settings the regressor \(X\) itself shows pronounced distributional heterogeneity, and the relationship between \(Y\) and \(X\) may differ markedly between low, middle and high values of \(X\). Standard QR treats such heterogeneity implicitly within a single linear index in \(X\) at each \(\tau\). The resulting coefficient \(\beta_1(\tau)\) can be interpreted as an *average* marginal effect of \(X\) at conditional quantile level \(\tau\), but it is not allowed to vary with the quantile of \(X\).
+
+As a consequence, standard QR can mask interactions between extreme values of \(X\) and extreme values of \(Y\), and it can be difficult to identify non linear or asymmetric patterns that occur only in specific regions of the joint distribution of \((Y,X)\) (Sim and Zhou, 2015; Shahzad et al., 2020). For example, dependence in the lower left tail or upper right tail of the joint distribution may be important in risk management and climate economics, yet it may be attenuated when the model conditions only on the level of \(X\).
+
+Quantile on quantile regression responds to this limitation by constructing a two dimensional mapping
+\[
+(\tau,\theta) \mapsto \beta_1(\tau,\theta),
+\]
+where \(\beta_1(\tau,\theta)\) captures how the effect of \(X\) on \(Y\) varies jointly across the \(\tau\)-quantiles of the dependent variable and the \(\theta\)-quantiles of the regressor. This perspective is particularly valuable when interest centres on tail dependence, regime dependent relationships or state dependent transmission mechanisms, which are often smoothed out in models that only index effects by the quantiles of the dependent variable.
+
+# 3. Quantile-on-quantile regression
+
+## 3.1 Conceptual formulation
+
+Let \(Q_X(\theta)\) denote the \(\theta\)-th quantile of the marginal distribution of \(X\), for \(\theta \in (0,1)\). The central object in QQR is the conditional \(\tau\)-quantile of \(Y\) evaluated at a particular quantile of \(X\),
+\[
+Q_Y\big(\tau \mid X = Q_X(\theta), W = w \big),
+\]
+which is a function of the two quantile indices \(\tau\) and \(\theta\).
+
+Following Sim and Zhou (2015), this conditional quantile can be approximated by a local linear expansion of the form
+\[
+Q_Y\big(\tau \mid X \approx Q_X(\theta), W = w \big)
+\approx
+\alpha(\tau,\theta)
++
+\beta(\tau,\theta)\, \big( X - Q_X(\theta) \big)
++
+\gamma(\tau,\theta)^{\top} w.
+\]
+Here
+
+* \(\alpha(\tau,\theta)\) is a local intercept, capturing the conditional \(\tau\)-quantile of \(Y\) when \(X\) is near \(Q_X(\theta)\) and the controls are set to zero;
+
+* \(\beta(\tau,\theta)\) is a local slope on the quantile regressor, describing how small changes in \(X\) in a neighbourhood of \(Q_X(\theta)\) affect the \(\tau\)-th conditional quantile of \(Y\);
+
+* \(\gamma(\tau,\theta)\) is a vector of local slopes on the control variables.
+
+For a given grid of outcome quantiles \(T \subset (0,1)\) and a grid of regressor quantiles \(\Theta \subset (0,1)\), the collection
+\[
+\big\{ \beta(\tau,\theta) : \tau \in T, \theta \in \Theta \big\}
+\]
+forms a *slope surface* that describes how the marginal impact of \(X\) varies jointly across the distributions of both \(Y\) and \(X\). When controls are omitted, the model reduces to a bivariate QQR specification. When controls are included, the QQR slope surface for \(X\) is interpreted conditionally on those controls.
+
+## 3.2 Local linear quantile regression
+
+The local approximation above is implemented using local linear quantile regression, which generalises local polynomial regression to conditional quantiles (Fan and Gijbels, 1996; Yu and Jones, 1998). In practice, `qqr` adopts an equivalent formulation that is easier to implement and interpret.
+
+Fix a quantile index \(\theta \in (0,1)\) for the regressor and let \(q_{\theta}\) denote its empirical counterpart, for example the empirical \(\theta\)-quantile of the sample \(\{X_t\}_{t=1}^{T}\). For each observation \(t\), define the localised regressor
+\[
+Z_t(\theta) = X_t - q_{\theta},
+\]
+which measures deviations of \(X_t\) from the reference point \(q_{\theta}\).
+
+To emphasise observations for which \(X_t\) lies close to \(q_{\theta}\), introduce kernel weights of the form
+\[
+w_t(\theta)
+=
+K\!\left( \frac{X_t - q_{\theta}}{h} \right),
+\]
+where \(K(\cdot)\) is a kernel function and \(h > 0\) is a bandwidth parameter that controls the degree of smoothing. In the original formulation of QQR, the kernel is applied to the difference between the empirical cumulative distribution function of \(X_t\) and the quantile index \(\theta\) (Sim and Zhou, 2015). In `qqr`, an equivalent implementation is obtained by centring on a grid of values in the support of \(X\) and applying the kernel in the regressor space.
+
+Conditional on \(\theta\) and \(\tau\), the local linear QQR estimator \((\hat\alpha(\tau,\theta), \hat\beta(\tau,\theta), \hat\gamma(\tau,\theta))\) is obtained by solving the weighted quantile regression problem
+\[
+(\hat\alpha(\tau,\theta), \hat\beta(\tau,\theta), \hat\gamma(\tau,\theta))
+=
+\arg\min_{\alpha,\beta,\gamma}
+\sum_{t=1}^{T}
+w_t(\theta)\,
+\rho_{\tau}\big( Y_t - \alpha - \beta Z_t(\theta) - \gamma^{\top} W_t \big),
+\]
+with \(\rho_{\tau}(\cdot)\) defined as in Section 2.1. This optimisation problem has the same structure as a weighted linear QR and can therefore be implemented using existing QR algorithms such as those in the `quantreg` package (Koenker, 2005).
+
+Repeating this procedure over a grid of regressor quantiles \(\theta \in \Theta\) and outcome quantiles \(\tau \in T\) yields estimates of
+
+* the local intercept surface \(\hat\alpha(\tau,\theta)\);
+
+* the local slope surface for the quantile regressor \(\hat\beta(\tau,\theta)\);
+
+* the local slope surfaces \(\hat\gamma_k(\tau,\theta)\) for each component \(W_k\) of the control vector.
+
+In empirical work it is often convenient to index the local models by a grid of *regressor locations* rather than quantile indices. This is the approach adopted in `qqr`.
+
+## 3.3 Discrete grid representation
+
+The continuous surfaces \(\beta(\tau,\theta)\) and \(\gamma_k(\tau,\theta)\) are approximated numerically by evaluating them on finite grids of outcome quantiles and regressor locations. Let
+\[
+T = \{\tau_1,\ldots,\tau_J\} \subset (0,1)
+\]
+denote a set of outcome quantile levels and let
+\[
+G = \{z_1,\ldots,z_M\}
+\]
+denote a grid of values in the support of \(X\). In `qqr`, this grid is constructed by equally spacing \(M = m\) points between the sample minimum and maximum of the observed values of the designated quantile regressor:
+\[
+z_i
+=
+\min_{t} X_t
++
+\frac{i - 1}{m - 1}
+\big( \max_{t} X_t - \min_{t} X_t \big),
+\quad
+i = 1,\ldots,m.
+\]
+
+For each grid point \(z_i\) and outcome quantile \(\tau_j\), a local linear QR is fitted using kernel weights
+\[
+w_t(z_i)
+=
+K\!\left( \frac{X_t - z_i}{h} \right),
+\]
+which yields estimates \((\hat\alpha_{ij}, \hat\beta_{ij}, \hat\gamma_{ij})\) for the intercept, the quantile regressor and each control variable. The collection of local estimates for the quantile regressor slopes can be organised as an \(m \times J\) matrix
+\[
+\hat\beta
+=
+[\hat\beta_{ij}]_{i=1,\ldots,m}^{\quad j=1,\ldots,J},
+\]
+and similarly for the intercept and control coefficient surfaces:
+\[
+\hat\alpha
+=
+[\hat\alpha_{ij}]_{i=1,\ldots,m}^{\quad j=1,\ldots,J},
+\quad
+\hat\gamma_k
+=
+[\hat\gamma_{k,ij}]_{i=1,\ldots,m}^{\quad j=1,\ldots,J}
+\quad
+\text{for each control } k.
+\]
+
+From a computational perspective, a fitted QQR model can therefore be represented by
+
+* the grid vector \(G = (z_1,\ldots,z_m)\);
+
+* the quantile vector \(T = (\tau_1,\ldots,\tau_J)\); and
+
+* a list of coefficient matrices \(\{\hat\alpha, \hat\beta, \hat\gamma_1,\ldots,\hat\gamma_K\}\).
+
+This is precisely the structure stored internally by the `qqr` package and exposed to users through its various methods and helper functions.
+
+## 3.4 Local sample information and standard errors
+
+The reliability of the local estimates \(\hat\beta_{ij}\) depends on the effective amount of information available near each grid point. Given the kernel weights \(\{w_t(z_i)\}_{t=1}^{T}\), a convenient measure of local sample size at \(z_i\) is
+\[
+n_{\text{eff}}(z_i)
+=
+\sum_{t=1}^{T} w_t(z_i).
+\]
+In practice this measure does not depend on the outcome quantile \(\tau_j\), but it is stored alongside the coefficient surfaces to help diagnose grid points where the effective local sample size is very small relative to the total sample.
+
+For inference, standard errors and p values for the coefficients at each \((z_i,\tau_j)\) are obtained by applying standard QR variance estimators to the local weighted QR models. The `qqr` package delegates this task to the `summary.rq` function from `quantreg`, which offers several options for the estimation of standard errors, including independent normal approximations, kernel based estimators, and bootstrap methods (Koenker and Hallock, 2001; Koenker, 2005). The user chooses the type of standard errors through the `se_type` argument, and the resulting p values are stored in matrices that are aligned with the corresponding coefficient surfaces.
+
+
+## 3.5 Bandwidth selection
+
+### 3.5.1 Why automatic selection matters {-}
+
+The bandwidth \(h\) is the single most influential tuning parameter in QQR. Too small a bandwidth yields a noisy, erratic surface because each local regression is based on very few effectively weighted observations; too large a bandwidth smooths over genuine local heterogeneity in the coefficient surface. Because a researcher can, intentionally or not, choose \(h\) post hoc to produce a surface that appears more interesting or confirms a prior hypothesis, free bandwidth selection constitutes a form of specification searching that undermines the credibility of the findings.
+
+The `qqr` package addresses this by making **automatic bandwidth selection the default**. Four principled, data-driven selectors are provided via the `h` argument of `qqr()`. In every case the selected bandwidth, the formula used to compute it, and the numerical inputs are stored in the fitted object under `h_method` and `h_details` and are printed by `print.qqr()` and `summary.qqr()`, so the selection can be reported transparently in a paper's methods section.
+
+### 3.5.2 Silverman's rule of thumb (`h = "silverman"`) {-}
+
+$$
+h_{\text{Silverman}} = 1.06\,\hat\sigma_X\, n^{-1/5},
+$$
+where \(\hat\sigma_X\) is the sample standard deviation of the quantile regressor and \(n\) is the sample size (Silverman, 1986). This is the classical minimum-variance bandwidth for kernel density estimation under the assumption that the true density is Gaussian. It is fast to compute, requires only the sample standard deviation, and is easy to reproduce and report. It is the **default** in `qqr`.
+
+### 3.5.3 Robust rule of thumb (`h = "robust"`) {-}
+
+$$
+h_{\text{robust}}
+= 0.9\,\min\!\left(\hat\sigma_X,\;\frac{\widehat{\mathrm{IQR}}_X}{1.34}\right)
+n^{-1/5},
+$$
+where \(\widehat{\mathrm{IQR}}_X\) is the sample interquartile range of the quantile regressor (Silverman, 1986; Scott, 1992). Dividing the IQR by 1.34 converts it to the scale of a standard deviation under normality. The \(\min(\cdot)\) operation selects the smaller of the two scale estimates, which suppresses the influence of heavy tails or outliers. This rule is preferred when the quantile regressor exhibits skewness, leptokurtosis, or outliers -- conditions that are common in financial returns, exchange rates, commodity prices, and other macroeconomic series.
+
+### 3.5.4 IQR-based rule (`h = "iqr"`) {-}
+
+$$
+h_{\text{IQR}} = \widehat{\mathrm{IQR}}_X\, n^{-1/5}.
+$$
+This rule scales the bandwidth directly to the interquartile range of the quantile regressor without the standard deviation correction. It is appropriate when the spread of the quantile regressor is better characterised by its interquartile range than by its standard deviation, for example when the variable has a bounded or strongly asymmetric distribution.
+
+### 3.5.5 Leave-one-out cross-validation (`h = "cv_fast"`) {-}
+
+The cross-validation selector minimises the out-of-sample quantile check-loss. Let \(\hat Q_{-t}(0.5;\,h)\) denote the leave-one-out weighted-quantile predictor of \(X_t\) at the median using bandwidth \(h\). The CV bandwidth is
+$$
+h_{\text{CV}}
+= \arg\min_{h \in \mathcal{H}}
+\frac{1}{n}\sum_{t=1}^{n}
+\rho_{0.5}\!\left(X_t - \hat Q_{-t}(0.5;\, h)\right),
+$$
+where \(\mathcal{H}\) is a 15-point search grid spanning
+\([0.5\,h_{\text{Silverman}},\; 2\,h_{\text{Silverman}}]\)
+(Yu and Jones, 1998). Cross-validation is the most defensible bandwidth selector for publication because it is fully data-driven, minimises a proper loss criterion, and involves no distributional assumptions. It is, however, computationally heavier than the rule-of-thumb methods.
+
+### 3.5.6 Sheather-Jones solve-the-equation plug-in (`h = "sj"`) {-}
+
+The Sheather-Jones selector uses base R `bw.SJ(x)` to find the bandwidth
+by solving the equation
+$$
+h = \left[\frac{R(K)}{n\,\hat\psi_4\!\left(g(h)\right)}\right]^{1/5}
+$$
+iteratively, where \(R(K) = \int K^2(u)\,du\) is the roughness of the
+kernel, \(\hat\psi_4 = \int [\hat f''(x)]^2\,dx\) is a pilot estimate
+of the integrated squared second derivative of the density, and \(g(h)\) is
+a pilot bandwidth for that estimate (Sheather and Jones, 1991). Unlike the
+Silverman rule, the SJ plug-in does not assume a particular functional form
+for \(f\). It is widely regarded as the best density-based selector
+available in base R (Jones, Marron and Sheather, 1996). No additional
+packages are required; the selector falls back to the Silverman rule with a
+warning if the solve-the-equation iteration fails to converge.
+
+A note on scope: like the Silverman and robust rules, `"sj"` is a
+**density-based** selector -- it treats \(X\) alone and does not use the
+outcome \(Y\). It therefore selects the bandwidth that is optimal for
+estimating the marginal density of the quantile regressor, not for the
+conditional quantile surface itself.
+
+### 3.5.7 Ruppert-Sheather-Wand direct plug-in (`h = "yj"`) {-}
+
+The Ruppert-Sheather-Wand (1995) selector uses `KernSmooth::dpill(x, y)` to
+minimise the MISE of a local linear regression of the outcome \(Y\) on the
+quantile regressor \(X\):
+$$
+h_{\text{YJ}}
+= \left[
+    \frac{\hat\sigma^2_\varepsilon\,\int K^2(u)\,du}
+         {n\,\hat f_X(x)\,[\hat m''(x)]^2\,\mu_2(K)^2}
+  \right]^{1/5},
+$$
+where \(\hat m''(x)\) is an estimate of the second derivative of the
+regression function \(m(x) = E(Y \mid X = x)\), obtained from pilot fits
+using Mallows \(C_p\) block sizes (Ruppert, Sheather and Wand, 1995).
+
+This is the **only selector in the suite that uses both \(X\) and \(Y\)**
+and that is tuned to regression rather than density loss. It is therefore the
+most structurally appropriate automatic selector for QQR, which is
+fundamentally a local regression problem (Yu and Jones, 1998). Requires the
+`KernSmooth` package, a recommended package that ships with standard R
+installations.
+
+### 3.5.8 np full least-squares cross-validation (`h = "npcv"`) and smooth-coefficient cross-validation (`h = "sc"`) {-}
+
+Both selectors use functions from the `np` package (Hayfield and Racine, 2008)
+and require `np` to be installed (listed in `Suggests`).
+
+**`"npcv"`** uses `np::npregbw(xdat = x, ydat = y, regtype = "ll")` to
+minimise the LOO least-squares loss:
+$$
+h_{\text{NPCV}}
+= \arg\min_{h}
+  \frac{1}{n}\sum_{t=1}^{n}
+  \left[Y_t - \hat m_{-t}(X_t;\,h)\right]^2,
+$$
+where \(\hat m_{-t}(X_t;\,h)\) is the leave-one-out local-linear fit at
+observation \(t\) using bandwidth \(h\). The `np` implementation uses
+generalised product kernels that support mixed continuous and categorical data
+(Li and Racine, 2004), making it the most general of all the selectors. It is
+also the most computationally intensive.
+
+**`"sc"`** uses `np::npscoefbw(xdat = x, ydat = y)` to select the bandwidth
+for the smooth varying-coefficient model
+$$
+Y_i = W_i^\top \gamma(Z_i) + u_i,
+$$
+where \(\gamma(Z_i)\) varies smoothly with the conditioning variable
+\(Z_i\). This is the closest structural analogue to QQR in least-squares
+form: QQR estimates \(\beta(\tau, z_i)\) -- a coefficient vector that
+varies with \(z_i\) -- which has exactly the same structure as the
+varying-coefficient model, but within a quantile rather than mean regression
+framework (Li and Racine, 2010; Li, Racine and Wooldridge, 2002).
+
+### 3.5.9 Manual bandwidth {-}
+
+A positive numeric value may still be passed directly to `h`. This is accepted -- for example to replicate a specific published result -- but triggers a **reproducibility warning** encouraging the researcher to use an automatic method. The warning message reads:
+
+> *"Bandwidth h was set manually to [value]. Manual bandwidth selection may affect results and reduce reproducibility. For automatic selection, use h = 'silverman' (default), 'robust', 'iqr', 'cv_fast', 'sj', 'yj', 'npcv', or 'sc'."*
+
+The fitted object records `h_method = "manual"` and the `print()` and `summary()` output include a prominent reminder. The following table summarises the recommended choice of method:
+
+| Situation | Recommended method |
+|---|---|
+| Normal or near-normal quantile regressor | `"silverman"` (default) |
+| Financial returns, exchange rates, commodity prices | `"robust"` |
+| Distribution better described by quartiles | `"iqr"` |
+| No distributional assumptions, no extra packages | `"cv_fast"` |
+| Best density-based selector, base R only | `"sj"` |
+| Regression data, best structural match to QQR | `"yj"` |
+| Mixed-type data, maximum data-driven rigour | `"npcv"` |
+| Varying-coefficient structural analogue | `"sc"` |
+| Replicating a specific prior result | Numeric `h` with explicit documentation |
+
+## 3.6 Practical considerations
+
+The choice of bandwidth \(h\), the number of grid points \(m\), and the set of quantile levels \(T\) involves trade offs between local detail, smoothness and computation time, similar to other local polynomial procedures (Fan and Gijbels, 1996). Very small bandwidths and very dense grids can reveal fine local structure but may lead to noisy estimates in regions where data are sparse. Larger bandwidths and coarser grids produce smoother surfaces but may blur local features.
+
+Users are encouraged to complement visual inspection of the estimated surfaces with diagnostics based on the effective local sample size and p value surfaces, and where necessary to experiment with different bandwidths and grid sizes. The methods described in this vignette apply for any such choices; `qqr` simply implements them in a way that is computationally convenient and aligned with standard QR routines.
+
+# 4. The QQR estimator and its R implementation
+
+## 4.1 The `qqr()` function and the QQR object
+
+The main user interface in the package is the function
+```{r, eval = FALSE}
+qqr(
+  formula,
+  data,
+  qvar      = NULL,
+  taus      = seq(0.05, 0.95, by = 0.05),
+  m         = 19,
+  h         = "silverman",
+  kernel    = c("gaussian"),
+  se_type   = c("nid", "ker", "boot", "none"),
+  na.action = stats::na.omit
+)
+```
+
+### 4.1.1 Model specification
+
+The `formula` argument specifies the conditional quantile model for \(Y\) as a linear function of the quantile regressor \(X\) and optional control variables \(W\). For example,
+
+\[
+Y = X + z_1 + z_2,
+\]
+
+defines \(Y\) as the left hand side, \(X\) as one of the right hand side regressors, and \(W = (Z_1, Z_2)^{\top}\) as additional controls. The `qvar` argument identifies which regressor is to be treated as the quantile regressor whose distribution will be probed by the QQR procedure. In this example, setting `qvar = "X"` designates \(X\) as the quantile regressor and treats \(z_1\) and \(z_1\) as controls.
+
+Internally, `qqr()` constructs a model frame, identifies the dependent and independent variables, and checks that the dependent variable and the quantile regressor are numeric. If multiple regressors are present on the right hand side of the formula, `qvar` must explicitly identify which one plays the role of \(X\). This design matches the conceptual framework in Section 3, in which a specific regressor is singled out as the variable whose distribution is explored through QQR.
+
+### 4.1.2 Grid, bandwidth and kernel
+
+The argument `m` determines the number of grid points in
+\[
+G = \{z_1,\ldots,z_m\},
+\]
+constructed as an equally spaced sequence between the sample minimum and maximum of the observed values of the quantile regressor, as in Section 3.3.
+
+The argument `h` controls the bandwidth of the kernel. As detailed in Section 3.5, it accepts either a character string naming an automatic selection method or a positive numeric value. The default is `h = "silverman"`. The four automatic methods are:
+
+* `"silverman"`: \(h = 1.06\,\hat\sigma_X\, n^{-1/5}\). The default. Fast, requires only the sample standard deviation. Optimal under normality (Silverman, 1986).
+* `"robust"`: \(h = 0.9\,\min(\hat\sigma_X,\, \widehat{\text{IQR}}_X/1.34)\, n^{-1/5}\). Preferred for heavy-tailed or skewed regressors (Silverman, 1986; Scott, 1992).
+* `"iqr"`: \(h = \widehat{\text{IQR}}_X\, n^{-1/5}\). Appropriate when spread is best captured by the interquartile range.
+* `"cv_fast"`: fast leave-one-out cross-validation over a 15-point grid spanning \([0.5\,h_{\text{Silverman}},\, 2\,h_{\text{Silverman}}]\). Minimises the LOO quantile check-loss at \(\tau = 0.5\). No additional packages required (Yu and Jones, 1998).
+* `"sj"`: Sheather-Jones solve-the-equation plug-in. Uses base R `bw.SJ(x)`. Widely regarded as the best density-based selector in base R (Sheather and Jones, 1991).
+* `"yj"`: Ruppert-Sheather-Wand direct plug-in. Uses `KernSmooth::dpill(x, y)`. The only selector that uses both \(X\) and \(Y\) and minimises regression MISE, making it the most structurally appropriate for QQR (Ruppert, Sheather and Wand, 1995).
+* `"npcv"`: np full least-squares cross-validation via `np::npregbw()`. Minimises LOO squared-error loss; supports mixed data types. Requires the `np` package (Hayfield and Racine, 2008).
+* `"sc"`: np smooth-coefficient cross-validation via `np::npscoefbw()`. Selects bandwidth for the varying-coefficient model \(Y_i = W_i^\top \gamma(Z_i) + u_i\) -- the closest structural analogue to QQR in least-squares form. Requires the `np` package (Li and Racine, 2010).
+
+A positive numeric value is also accepted but triggers a reproducibility warning (see Section 3.5.6). The selected or supplied bandwidth, its method label, and a full description are stored in `fit$bandwidth`, `fit$h_method`, and `fit$h_details` respectively, and are printed by `print.qqr()` and `summary.qqr()`.
+
+The default kernel is Gaussian. In mathematical notation it is given by
+\[
+K(u)
+=
+\frac{1}{\sqrt{2\pi}} \exp\!\left( -\frac{u^2}{2} \right),
+\]
+so that the local weights at grid point \(z_i\) are
+\[
+w_t(z_i)
+=
+K\!\left( \frac{X_t - z_i}{h} \right).
+\]
+These weights enter the objective function for the local linear QR at each grid point as described in Section 3.2. The combination of `m` and `h` governs the balance between local resolution and smoothness of the estimated coefficient surfaces.
+
+### 4.1.3 Coefficient and p value surfaces
+
+For each grid point \(z_i\) and quantile level \(\tau_j\), `qqr()` solves the corresponding weighted QR problem and records:
+
+* \(\hat\alpha_{ij}\): the local intercept;
+
+* \(\hat\beta_{ij}\): the local slope on the quantile regressor;
+
+* \(\hat\gamma_{k,ij}\): the local slopes on each control variable \(W_k\);
+
+* p values for each coefficient, when `se_type` is not `"none"`.
+
+These quantities are stored in two parallel lists of matrices:
+
+* `coef_surfaces`: a named list of coefficient matrices, one for each coefficient in the model;
+
+* `pval_surfaces`: a named list of p value matrices with the same dimensions and names.
+
+If the formula includes an intercept, its internal coefficient name is `"(Intercept)"`. The quantile regressor slope is stored under the actual variable name supplied in `qvar`, and each control variable appears under its own name. The fitted model uses the localised pseudo-regressor
+\[
+Z_t(z_i) = X_t - z_i
+\]
+internally for estimation, but the resulting coefficient is stored and accessed through the original variable name. For convenience, the matrix for the quantile regressor slope is also extracted as `qcoef`, so that
+\[
+\texttt{fit\$qcoef}
+=
+[\hat\beta_{ij}]_{i=1,\ldots,m}^{\quad j=1,\ldots,J}.
+\]
+
+Additional slots in the returned object include:
+
+* `grid`: the numeric vector \((z_1,\ldots,z_m)\);
+
+* `taus`: the vector of outcome quantile levels \((\tau_1,\ldots,\tau_J)\);
+
+* `effective_n`: a matrix of effective local sample sizes \(n_{\text{eff}}(z_i)\);
+
+* `controls`: the names of the control variables \(W\);
+
+* `intercept`: a logical flag indicating whether an intercept was included;
+
+* `bandwidth`, `h_method`, and `h_details`: the numeric bandwidth, the selection method label (e.g. `"silverman"`), and a full description of how \(h\) was chosen, suitable for inclusion in a paper's methods section;
+
+* `n`: the number of observations used in the fit.
+
+The object returned by `qqr()` therefore contains a complete discrete representation of the QQR coefficient surfaces for all coefficients in the model, along with information about the local sample sizes and tuning parameters.
+
+## 4.2 Printing and summarising QQR objects
+
+### 4.2.1 `print.qqr()`
+
+The `print.qqr()` method provides a compact textual description of a fitted QQR model. It reports the original call, the names of the dependent variable, the quantile regressor and any controls, whether an intercept was included, the sample size, the number of grid points and quantiles, the kernel, the SE type, and the bandwidth with its selection method. When `h` was supplied manually, a prominent warning line is included. This output is intended as a diagnostic view of the model specification rather than as a full statistical summary.
+
+### 4.2.2 `summary.qqr()` and `print.summary.qqr()`
+
+The `summary.qqr()` method focuses on the slope surface for the quantile regressor,
+\[
+\hat\beta = [\hat\beta_{ij}]_{i=1,\ldots,m}^{\quad j=1,\ldots,J},
+\]
+and computes a set of global summaries:
+
+* the range of the grid, \(\min_i z_i\) and \(\max_i z_i\);
+
+* the minimum and maximum values of the slope surface, \(\min_{i,j} \hat\beta_{ij}\) and \(\max_{i,j} \hat\beta_{ij}\);
+
+* the overall mean and standard deviation of the slope values, viewed as the \(m \times J\) collection \(\{\hat\beta_{ij}\}\);
+
+* the row means
+\[
+\bar\beta_i
+=
+\frac{1}{J} \sum_{j=1}^{J} \hat\beta_{ij},
+\quad
+i = 1,\ldots,m,
+\]
+which average the slope across the outcome quantiles at each grid point;
+
+* the column means
+\[
+\tilde\beta_j
+=
+\frac{1}{m} \sum_{i=1}^{m} \hat\beta_{ij},
+\quad
+j = 1,\ldots,J,
+\]
+which average the slope across the grid at each outcome quantile.
+
+The associated `print.summary.qqr()` method formats and prints these quantities. The row means \(\{\bar\beta_i\}\) summarise how the average effect of \(X\) varies across its support, while the column means \(\{\tilde\beta_j\}\) summarise how the average effect varies across the quantiles of \(Y\).
+
+The updated `summary.qqr()` object also carries a **bandwidth diagnostics block**, comprising `bandwidth`, `h_method`, `h_details`, `kernel`, `se_type`, and `n`. The `print.summary.qqr()` method formats these into a dedicated section that reports the selection formula, the numerical inputs (\(\hat\sigma_X\), \(\widehat{\text{IQR}}_X\), \(n\)) and the resulting \(h\). This block is designed to be transcribed verbatim into the methods section of a research paper.
+
+## 4.3 Extracting coefficient surfaces as tables
+
+### 4.3.1 `qqr_surface()`: coefficient and p value tables
+
+The helper function
+```{r, eval = FALSE}
+qqr_surface(
+  x,
+  coef               = "all",
+  what               = c("coef", "pvalue"),
+  grid_subset        = NULL,
+  tau_subset         = NULL,
+  include_grid_value = TRUE,
+  digits             = NULL,
+  long               = NULL
+)
+```
+extracts one or more surfaces from a fitted QQR object and returns them in data frame form. Its role is to provide a bridge between the internal matrices and downstream workflows such as plotting, reporting or further analysis.
+
+The argument `what` selects between coefficient matrices \([\hat\alpha_{ij}], [\hat\beta_{ij}], [\hat\gamma_{k,ij}]\) and the corresponding p value matrices. The argument `coef` identifies which coefficients to extract. For example:
+
+* `coef = "X"` returns the surface for the quantile regressor slope, \([\hat\beta_{ij}]\);
+
+* `coef = "intercept"` returns the surface for the intercept, \([\hat\alpha_{ij}]\);
+
+* `coef = "all"` returns all coefficient surfaces.
+
+For a single coefficient and `long = FALSE`, `qqr_surface()` returns a wide matrix like data frame with rows indexed by grid points and columns indexed by quantile levels. The typical structure is
+\[
+\text{Grid}_{\text{Point}},\quad 
+\text{Grid}_{\text{Value}},\quad
+\tau_{\tau_1}, \ldots, \tau_{\tau_J}
+\]
+
+This representation corresponds directly to the matrix \([\hat\beta_{ij}]\) in Section 3.3, with `Grid_Point` indicating the index \(i\), `Grid_Value` giving \(z_i\), and the `tau_*` columns providing \(\hat\beta_{ij}\) for each \(j\).
+
+When multiple coefficients are requested or `long = TRUE`, `qqr_surface()` returns a tidy long data frame with one row per coefficient–grid–quantile triple:
+\[
+(\text{Coefficient},\ \text{Grid}_{\text{Point}},\ \text{Grid}_{\text{Value}},\ \tau,\ \hat{\beta}_{ij})
+\]
+
+which is convenient for tidy workflows and flexible plotting systems. The `digits` argument allows the user to apply rounding for presentation without affecting the underlying QQR object.
+
+### 4.3.2 `rowave.qqr()`: row wise averages across quantiles
+
+The function
+```{r, eval = FALSE}
+rowave.qqr(
+  x,
+  coef   = "all",
+  na.rm  = TRUE,
+  digits = NULL,
+  ...
+)
+```
+computes row means of the coefficient surfaces across all outcome quantiles. When `coef = "all"`, it constructs, for each coefficient \(k\), the summary
+\[
+\bar\beta_{k,i}
+=
+\frac{1}{J} \sum_{j=1}^{J} \hat\beta_{k,ij},
+\quad
+i = 1,\ldots,m,
+\]
+and returns a data frame with columns
+\[
+\text{grid}_{\text{index}},\quad
+\text{grid}_{\text{value}},\quad
+\bar{\beta}_{\text{Intercept},\,i},\quad
+\bar{\beta}_{X,i},\quad
+\bar{\beta}_{W_1,i},\ldots
+\]
+
+
+For a single coefficient, for example `coef = "X"`, the function returns a data frame with `grid_index`, `grid_value` and one column, say `mean_X`, containing the row means \(\bar\beta_i\) as defined in Section 4.2.2. This provides a compact one dimensional summary of how the average slope for a given coefficient varies across the support of the quantile regressor.
+
+Again, the `digits` argument only affects the formatting of the returned data frame and not the stored QQR object.
+
+## 4.4 Visualising QQR surfaces
+
+### 4.4.1 `plot.qqr()`: static three dimensional surfaces
+
+The S3 method
+```{r, eval = FALSE}
+plot(
+  x,
+  coef   = x$independent,
+  what   = c("coef", "pvalue"),
+  engine = c("plot3D", "base"),
+  ...
+)
+```
+produces a three dimensional perspective plot of a selected surface from a QQR object. Internally, it retrieves the matrix \([\hat\beta_{ij}]\) or \([\hat p_{ij}]\), where \(\hat p_{ij}\) is the p value associated with the coefficient at \((z_i,\tau_j)\), and uses either base graphics or the `plot3D` package to plot the surface against the grid and quantile axes.
+
+Mathematically, the plot shows the function
+\[
+(z_i,\tau_j) \mapsto \hat\beta_{ij}
+\quad \text{or} \quad
+(z_i,\tau_j) \mapsto \hat p_{ij},
+\]
+with the horizontal axes corresponding to the regressor grid and the outcome quantiles \(\tau_j\), and the vertical axis showing either coefficient values or p values.
+
+By visualising \(\hat\beta_{ij}\) as a surface, the user can directly inspect patterns such as:
+
+* changes in the sign or magnitude of the slope across regions of the regressor distribution;
+
+* clustering of significant effects in particular areas of the joint quantile space;
+
+* non linearities or asymmetries that would be difficult to detect from one dimensional summaries alone.
+
+### 4.4.2 `Int.plot()`: interactive three dimensional surfaces
+
+The generic function
+```{r, eval = FALSE}
+Int.plot(x, ...)
+```
+with method
+```{r, eval = FALSE}
+Int.plot.qqr(
+  x,
+  coef      = x$independent,
+  what      = c("coef", "pvalue"),
+  add_plane = FALSE,
+  plane_z   = 0,
+  ...
+)
+```
+uses the `rgl` package to produce interactive three dimensional visualisations of the same surfaces. The method maps each grid–quantile pair \((z_i,\tau_j)\) to a point in \(\mathbb{R}^3\) with coordinates \((z_i,\tau_j,\hat\beta_{ij})\) or \((z_i,\tau_j,\hat p_{ij})\) and renders them in an interactive window where users can rotate, zoom and change the viewing angle.
+
+An optional reference plane at height `plane_z` can be added to mark, for example, the zero line for coefficients or a chosen significance threshold for p values. In mathematical terms this is the set
+\[
+\{(x,y,z) \in \mathbb{R}^3 : z = \text{plane}_{z}\}.
+\]
+
+
+These interactive plots help to explore complex surfaces, especially when detailed inspection of local features is important.
+
+
+### 4.4.3 `surface3d()`: publication-quality 3D surface plots
+
+The generic function `surface3d()` with S3 method `surface3d.qqr()` produces a smooth coloured three-dimensional perspective surface of the raw \(m \times J\) QQR coefficient matrix using base R graphics. It is the R equivalent of MATLAB's `surf()` applied directly to the QQR output, and requires no additional plotting packages.
+
+```{r, eval = FALSE}
+surface3d(
+  x,
+  coef           = x$independent,
+  what           = c("coef", "pvalue"),
+  palette        = "viridis",
+  theta          = -30,
+  phi            = 25,
+  r              = 3,
+  clim           = NULL,
+  add_zero_plane = FALSE,
+  alpha          = 0.85,
+  legend         = TRUE,
+  ...
+)
+```
+
+The horizontal axes span the quantile regressor grid \((z_1,\ldots,z_m)\) and the outcome quantile levels \((\tau_1,\ldots,\tau_J)\), and the vertical axis shows the coefficient or p value at each \((z_i,\tau_j)\). Colour encodes the vertical dimension through a palette from `hcl.colors()`.
+
+Key arguments:
+
+* `coef`: the coefficient to plot. Accepts the quantile regressor name, `"intercept"` or any control variable name.
+* `what`: `"coef"` (default) plots the coefficient surface \([\hat\beta_{ij}]\); `"pvalue"` plots the p value surface \([\hat p_{ij}]\).
+* `palette`: any palette name accepted by `hcl.colors()`, e.g. `"viridis"`, `"plasma"`, `"RdBu"`, `"YlGnBu"`.
+* `theta`, `phi`: azimuthal and colatitudinal viewing angles in degrees, passed to `persp()`.
+* `clim`: a two-element numeric vector `c(min, max)` fixing the colour scale limits. Setting this to the same values across multiple plots ensures that colours are directly comparable across coefficients or models.
+* `add_zero_plane`: when `TRUE`, a translucent red reference plane at \(z = 0\) is superimposed on the surface. This is particularly useful for coefficient plots, where the zero plane separates positive and negative slopes.
+* `alpha`: surface transparency, ranging from 0 (fully transparent) to 1 (fully opaque).
+* `legend`: when `TRUE` (the default), a vertical colour scale bar is drawn to the right of the surface.
+
+A typical call for a coefficient surface with zero reference plane:
+
+```{r, eval = FALSE}
+surface3d(fit, coef = "X",
+          palette        = "RdBu",
+          clim           = c(-2, 2),
+          add_zero_plane = TRUE,
+          theta          = 45,
+          phi            = 30)
+```
+
+To plot the p value surface:
+
+```{r, eval = FALSE}
+surface3d(fit, coef = "X", what = "pvalue",
+          clim    = c(0, 1),
+          palette = "YlGnBu")
+```
+
+### 4.4.4 `panel_surface()`: ribbon panel plots
+
+The generic function `panel_surface()` with S3 method `panel_surface.qqr()` produces a ribbon panel plot with one coloured flat panel per coefficient. Panels are arranged side-by-side along the variable axis, with outcome quantile levels on the other axis, and colour encoding coefficient magnitude on a shared scale across all panels. This layout reproduces the style used in several published QQR studies.
+
+```{r, eval = FALSE}
+panel_surface(
+  x,
+  coef           = x$coef_names,
+  what           = c("coef", "pvalue"),
+  palette        = "viridis",
+  theta          = -40,
+  phi            = 25,
+  clim           = NULL,
+  add_zero_plane = FALSE,
+  ...
+)
+```
+
+The `coef` argument accepts a vector of coefficient names, so it is straightforward to display a subset of coefficients. The `clim` argument, shared with `surface3d()`, is especially useful in panel plots because it ensures that colours have the same interpretation across all panels, making direct visual comparison possible.
+
+## 4.5 Exporting QQR surfaces to external formats
+
+### 4.5.1 `excel.qqr()`: Excel workbooks
+
+The function
+```{r, eval = FALSE}
+excel.qqr(
+  x,
+  file               = "QQR_coefficients.xlsx",
+  which              = c("both", "coef", "pvalue"),
+  overwrite          = TRUE,
+  include_grid_value = TRUE,
+  digits             = NULL
+)
+```
+writes coefficient and p value surfaces to an Excel workbook using `openxlsx`. For each coefficient, the corresponding matrix \([\hat\beta_{ij}]\) or \([\hat p_{ij}]\) is transformed into a data frame with columns
+\[
+\text{Grid}_{\text{Point}},\quad
+\text{Grid}_{\text{Value}},\quad
+\tau_{\tau_1},\ldots,\tau_{\tau_J}
+\]
+
+mirroring the matrix representation in Section 3.3, and then written to a dedicated worksheet. Sheet names encode the coefficient identity and whether the sheet contains coefficients (`_coef`) or p values (`_pval`). The workbook therefore contains a complete set of tables representing the discrete approximations to \(\alpha(\tau,\theta)\), \(\beta(\tau,\theta)\) and \(\gamma(\tau,\theta)\) and their associated p values.
+
+The `digits` argument allows for rounding of numeric entries in the exported file, while `include_grid_value` controls whether the actual grid values \(z_i\) are included alongside their indices.
+
+### 4.5.2 `word.qqr()`: Word documents
+
+The function
+```{r, eval = FALSE}
+word.qqr(
+  x,
+  file               = "QQR_results.docx",
+  coef               = x$independent,
+  which              = c("both", "coef", "pvalue", "coef_stars"),
+  grid_subset        = NULL,
+  digits             = NULL,
+  include_grid_value = TRUE
+)
+```
+exports selected coefficient and p value surfaces to a Word document using `officer` and `flextable`. It begins by extracting the relevant matrices \([\hat\beta_{ij}]\) and \([\hat p_{ij}]\) for the specified coefficient and an optional subset of grid points. Each matrix is converted into a data frame of the form
+\[
+\text{Grid}_{\text{Point}},\quad
+\text{Grid}_{\text{Value}},\quad
+\tau_{\tau_1},\ldots,\tau_{\tau_J}
+\]
+which is then rendered as a formatted table in the Word document.
+
+The `which` argument selects what to export:
+
+* `"coef"`: coefficient table only.
+* `"pvalue"`: p value table only.
+* `"both"` (default): separate coefficient and p value tables in the same document.
+* `"coef_stars"`: a single combined table with significance stars appended directly to each coefficient. This is the format most commonly used in published empirical papers.
+
+When `which = "coef_stars"`, each cell of the table is formatted as
+\[
+\text{cell}_{ij} =
+\hat\beta_{ij} \;\|\;
+\begin{cases}
+\texttt{***} & \hat p_{ij} < 0.01 \\
+\texttt{**}  & \hat p_{ij} < 0.05 \\
+\texttt{*}   & \hat p_{ij} < 0.10 \\
+             & \hat p_{ij} \ge 0.10 \\
+\texttt{[NA]}& \hat p_{ij} = \texttt{NA}
+\end{cases}
+\]
+where `[NA]` marks grid-quantile combinations where p values could not be computed (for example, because the effective local sample size at that grid point was too small). This marker ensures that no cell is left ambiguously blank. A footnote is appended automatically below the table explaining the star conventions and the `[NA]` notation.
+
+As with `excel.qqr()`, rounding via `digits` is applied only at the output stage and does not alter the underlying QQR object.
+
+
+## 4.6  Comparing standard quantile regression with row-mean QQR effects
+
+Many applied papers estimate a standard quantile regression (QR) and a quantile-on-quantile regression (QQR) on the same specification and then compare the two sets of coefficients across quantile levels, often using QR as a benchmark because its asymptotic theory is well established and implemented easily (Koenker and Bassett, 1978; Koenker, 2005). QQR is semi-parametric in the sense that the effect of the covariates is allowed to vary smoothly over a grid of quantiles of a chosen regressor and is estimated with local linear quantile regression (Yu and Jones, 1998; Sim and Zhou, 2015). This richer structure yields a full coefficient surface \(\beta(\tau, z)\), indexed by the conditional quantile level \(\tau\) of the response and by the quantile-regressor grid value \(z\).  
+
+Empirically, some researchers treat the formal p-values from QQR with caution because they are obtained from a nonparametric smoothing step and may be sensitive to bandwidth choice, finite-sample bias and boundary effects. They instead check whether the shape of the QQR surface, after an appropriate averaging, is consistent with the simpler QR estimates, which are based on a purely parametric linear conditional quantile model (for examples of QQR–QR robustness checks see Sim and Zhou, 2015; Balcilar et al., 2017). The `qqr` package operationalises this practice by providing tools that collapse the bivariate QQR surface to a univariate function of \(\tau\) and compare it directly with the QR coefficients.
+
+Let \(Y\) denote the response, \(X\) a vector of regressors and \(Z\) the quantile regressor used in QQR (argument `qvar`). A standard linear QR model for a fixed quantile level \(\tau\) assumes  
+\[
+Q_{Y\mid X}(\tau \mid X = x) = x^{\top}\beta^{\mathrm{QR}}(\tau),
+\]
+and estimates \(\beta^{\mathrm{QR}}(\tau)\) by minimising the sample check-loss (Koenker, 2005). QQR instead specifies a locally linear model in \(Z\),  
+\[
+Q_{Y\mid X,Z}(\tau \mid X = x, Z = z)
+  = x^{\top}\beta(\tau,z),
+\]
+where the coefficient vector \(\beta(\tau,z)\) is allowed to vary smoothly in \(z\). In practice, QQR evaluates this surface on a grid of \(M\) values \(z_1,\dots,z_M\) and on a set of quantile levels \(\tau_1,\dots,\tau_K\). For each pair \((\tau_k,z_m)\) a local linear quantile regression is run using kernel weights \(K_h(Z_i - z_m)\) as in Yu and Jones (1998), yielding an estimated surface \(\hat{\beta}(\tau_k,z_m)\).
+
+A natural way to compare QQR with QR is to aggregate \(\hat{\beta}(\tau_k,z_m)\) along the quantile-regressor dimension. Under a stylised data-generating process with continuous \(Z\), if \(Q_{Y\mid X,Z}(\tau\mid X,Z)\) is linear in \(X\) with slope vector \(\beta(\tau,Z)\), and if we define an average conditional quantile model  
+\[
+Q_{Y\mid X}(\tau \mid X = x)
+  := \mathbb{E}\big[Q_{Y\mid X,Z}(\tau \mid X = x, Z) \mid X = x\big],
+\]
+then, assuming the conditional expectation and quantile operators can be interchanged and that the slope is separable from the distribution of \(Z\),  
+\[
+Q_{Y\mid X}(\tau \mid X = x) = x^{\top}\,\underbrace{\mathbb{E}[\beta(\tau,Z)]}_{\bar\beta(\tau)}.
+\]
+In other words, the global QR slope \(\beta^{\mathrm{QR}}(\tau)\) coincides with the average of the QQR slope over the distribution of \(Z\),  
+\[
+\beta^{\mathrm{QR}}(\tau) = \bar\beta(\tau)
+= \int \beta(\tau,z)\, f_Z(z)\,\mathrm{d}z,
+\]
+where \(f_Z\) is the density of \(Z\).  
+
+In the QQR implementation, \(f_Z\) is approximated by the empirical distribution of the grid points \(z_m\). A simple Riemann approximation to the integral then yields the row–mean QQR effect at quantile \(\tau_k\):  
+\[
+\hat{\bar\beta}(\tau_k)
+  = \frac{1}{M}\sum_{m=1}^{M} \hat{\beta}(\tau_k,z_m).
+\]
+If the QQR surface is a consistent estimator of \(\beta(\tau,z)\) and the grid covers the support of \(Z\), then \(\hat{\bar\beta}(\tau_k)\) converges to the same limit as the QR slope \(\hat{\beta}^{\mathrm{QR}}(\tau_k)\) under the model described above. The comparison  
+\[
+\hat{\beta}^{\mathrm{QR}}(\tau_k) \quad\text{versus}\quad \hat{\bar\beta}(\tau_k)
+\]
+becomes a diagnostic for whether the more flexible QQR surface, once averaged over the quantiles of the regressor, behaves consistently with the simpler QR model. Large discrepancies suggest either that the QQR surface captures richer nonlinearity or interaction that the global QR cannot see, or that the smoothing and bandwidth choices in QQR are inducing non-negligible bias.  
+
+The `qqr` package provides a family of helper functions that automate this comparison:
+
+- `compare.qqr()` constructs a tidy data frame with the QR coefficients and row-mean QQR effects for a chosen coefficient across a grid of \(\tau\) values.
+- `excel.compare.qqr()` exports the same comparison table to an Excel workbook using `openxlsx`.
+- `word.compare.qqr()` exports the comparison table as a formatted Word document using `officer` and `flextable`.
+- `plot.compare.qqr()` is a plotting method for the comparison object that produces publication-ready coefficient plots with \(\tau\) on the horizontal axis and coefficient values on the vertical axis using `ggplot2`.
+
+The following subsections explain each function in detail and illustrate how they can be used in empirical work.
+
+### 4.6.1  Comparing QR and row–mean QQR with `compare.qqr()`
+
+The function `compare.qqr()` takes an object produced by `qqr()` and quietly fits a standard QR with the same formula, dataset and set of quantile levels. It then aggregates the QQR coefficient surface across the quantile-regressor grid and returns a tidy table with one row per quantile level \(\tau\).  
+
+Conceptually, `compare.qqr()` implements the mapping  
+\[
+(\hat{\beta}^{\mathrm{QR}}(\tau_k),\; \hat{\beta}(\tau_k,z_1),\dots,\hat{\beta}(\tau_k,z_M))
+     \;\longmapsto\;
+(\tau_k,\;\hat{\beta}^{\mathrm{QR}}(\tau_k),\;\hat{\bar\beta}(\tau_k)),
+\]
+where \(\hat{\bar\beta}(\tau_k)\) is the grid-average QQR effect defined above. The function focuses on a single coefficient at a time, typically the quantile regressor itself or a key control.  
+
+At a high level the interface is
+
+```r
+compare.qqr(x,
+            coef   = x$independent,
+            na.rm  = TRUE,
+            digits = NULL)
+```
+
+The arguments are:
+
+- `x`: a fitted QQR object produced by `qqr()`.
+- `coef`: a character vector with the coefficients to compare. The default is `x$independent` (the quantile regressor). Use `"all"` to compare all coefficients, or provide one or more specific names such as `"intercept"`, `"(Intercept)"` or control-variable names.
+- `na.rm`: logical flag passed to the averaging step. When `TRUE` (the default), missing entries in the QQR surface are removed before computing the row means.
+- `digits`: optional integer controlling the rounding of both QR and averaged QQR coefficients in the returned table. Rounding is purely cosmetic and does not alter the underlying fits.
+
+When a single coefficient is requested, `compare.qqr()` returns a data frame with three columns:
+
+- `tau`: the quantile level \(\tau_k\);
+- `qr`: the QR coefficient \(\hat{\beta}^{\mathrm{QR}}(\tau_k)\);
+- `qqr_mean`: the row-mean QQR coefficient \(\hat{\bar\beta}(\tau_k)\).
+
+When multiple coefficients are requested, the function returns a named list of such data frames, with one element per coefficient. This format is convenient for exporting and plotting coefficient-specific comparisons.
+
+For example, continuing the simulated example in Section 5 below, one could write
+
+```r
+cmp_X <- compare.qqr(fit, coef = "X", digits = 3)
+head(cmp_X)
+```
+
+which produces a table suitable for direct inclusion in a report or for further processing by the export and plotting helpers described next.
+
+### 4.6.2  Exporting QR-QQR comparisons to Excel with `excel.compare.qqr()`
+
+The function `excel.compare.qqr()` wraps `compare.qqr()` and writes its output to an Excel workbook using `openxlsx`. This is useful when QR–QQR comparisons need to be archived, shared with collaborators or imported into other software. The typical call is
+
+```r
+excel.compare.qqr(
+  x,
+  file   = "QQR_QR_comparison.xlsx",
+  coef   = x$independent,
+  na.rm  = TRUE,
+  digits = NULL
+)
+```
+
+The arguments mirror those of `compare.qqr()` with one additional parameter:
+
+- `file`: path to the Excel file to be created. If a file with the same name already exists, it is overwritten by default (the behaviour of `openxlsx::saveWorkbook()` in this wrapper).
+
+If `coef` identifies a single coefficient, the resulting workbook contains one worksheet with three columns (`tau`, `qr`, `qqr_mean`). If `coef = "all"` or a vector of names is supplied, each coefficient is written to its own worksheet, whose name encodes the coefficient label. The exported tables preserve the one-row-per-quantile structure and the ordering of \(\tau\) values used in the original QQR fit.
+
+### 4.6.3  Exporting QR-QQR comparisons to Word with `word.compare.qqr()`
+
+For users who prepare documents in Word, `word.compare.qqr()` provides an analogous export facility using the `officer` and `flextable` packages. It takes the same core arguments as `compare.qqr()`:
+
+```r
+word.compare.qqr(
+  x,
+  file   = "QQR_QR_comparison.docx",
+  coef   = x$independent,
+  na.rm  = TRUE,
+  digits = NULL
+)
+```
+
+For each requested coefficient, the function inserts a short heading indicating the dependent variable and coefficient name, followed by a `flextable` with three columns (`tau`, `qr`, `qqr_mean`). These tables use the same ordering and rounding as the output of `compare.qqr()`. The resulting document can be edited further in Word, for example by adjusting table styles, adding captions or combining the comparisons with narrative interpretation.
+
+This helper is especially convenient when QR–QQR robustness checks are reported as separate tables in empirical papers, for example to demonstrate that the averaged QQR effects track the standard QR coefficients for key regressors.
+
+### 4.6.4  Plotting QR and row-mean QQR coefficients with `plot.compare.qqr()`
+
+Visual comparison of QR and QQR is often more informative than inspection of tables alone. The S3 method `plot.compare.qqr()` constructs a two-line coefficient plot using `ggplot2`, with quantile levels on the horizontal axis and coefficient values on the vertical axis. Its interface is
+
+```r
+## S3 method for class 'compare.qqr'
+plot(
+  x,
+  coef         = x$independent,
+  title        = NULL,
+  xlab         = "Quantile level (tau)",
+  ylab         = "Coefficient",
+  legend_title = "",
+  na.rm        = TRUE,
+  digits       = NULL
+)
+```
+
+Here:
+
+- `x` is typically the original `qqr` fit. Internally, the method calls `compare.qqr()` to obtain the comparison table for the requested coefficient.
+- `coef` selects the coefficient to plot. Only a single coefficient is allowed. The default is the quantile regressor.
+- `title` is an optional plot title. When `NULL`, a default title is constructed using the coefficient name and the dependent variable.
+- `xlab`, `ylab` and `legend_title` control the axis and legend labels.
+- `na.rm` and `digits` are passed through to `compare.qqr()` to control the treatment of missing values and rounding before plotting.
+
+The method returns a `ggplot` object, so users can further customise the theme or layers. A typical usage pattern is
+
+```r
+## Compare QR and QQR for the quantile regressor
+p_X <- plot.compare.qqr(fit, coef = "X")
+p_X
+```
+
+which draws a plot with the QR coefficients and row–mean QQR coefficients connected by lines across \(\tau\). Discrepancies between the two lines highlight quantile regions where the nonparametric QQR reveals behaviour that is not captured by the global linear QR model.
+
+## 5. Example workflow
+
+This section illustrates a basic workflow using simulated data. The example is deliberately simple and is designed to show how the R code maps to the mathematical objects defined earlier. It also demonstrates how the options for including or omitting the grid values propagate through the extract, export and comparison helpers.
+
+```{r, message = FALSE}
+library(qqr)
+
+set.seed(1)
+n  <- 300
+X  <- rnorm(n)
+W1 <- rnorm(n)
+W2 <- rnorm(n)
+U  <- rnorm(n)
+
+## Simple data generating process with heterogeneous effect of X
+## The effect of X on Y depends on an unobserved random quantile.
+Y  <- 0.5 + X * qnorm(runif(n)) + 0.3 * W1 - 0.2 * W2 + U
+
+dat <- data.frame(Y = Y, X = X, W1 = W1, W2 = W2)
+
+## 1. Fit QQR model
+taus <- seq(0.1, 0.9, by = 0.2)
+m    <- 11
+
+fit <- qqr(
+  Y ~ X + W1 + W2,
+  data    = dat,
+  qvar    = "X",
+  taus    = taus,
+  m       = m,
+  h       = "silverman",   # automatic -- recommended default
+  se_type = "nid"
+)
+
+## Robust bandwidth alternative (preferred for heavy-tailed data)
+## fit_robust <- qqr(Y ~ X + W1 + W2, data = dat, qvar = "X",
+##                  taus = taus, m = m, h = "robust")
+
+## Cross-validated bandwidth (most defensible for publication)
+## fit_cv <- qqr(Y ~ X + W1 + W2, data = dat, qvar = "X",
+##               taus = taus, m = m, h = "cv_fast")
+
+## Manual bandwidth (triggers reproducibility warning)
+## fit_manual <- suppressWarnings(
+##   qqr(Y ~ X + W1 + W2, data = dat, qvar = "X",
+##       taus = taus, m = m, h = 0.4)
+## )
+
+## 2. Inspect the structure
+fit
+s <- summary(fit)
+s
+
+## 2b. Retrieve bandwidth details for the methods section
+cat(s$h_details)
+```
+
+The object `fit` contains the full set of coefficient and p value surfaces described in Section 3.3, together with the grid, quantile vector and bandwidth diagnostics. The `h_details` field prints the selection formula, the numerical inputs, and the resulting bandwidth in a format ready to include in a paper's methods section.
+
+```{r}
+## 3. Extract the slope surface for X as a wide table
+surf_X <- qqr_surface(
+  fit,
+  coef   = "X",
+  what   = "coef",
+  long   = FALSE,
+  digits = 3
+)
+
+head(surf_X)
+```
+
+The object `surf_X` is a data frame representation of the slope surface \([\hat\beta_{ij}]\) for the quantile regressor, indexed by grid point and outcome quantile. Each row corresponds to a grid location \(z_i\), and each `tau_*` column corresponds to an outcome quantile \(\tau_j\).
+
+```{r}
+## 4. Compute row averages of the slope for all coefficients,
+##    including the grid values is True by default
+row_means <- rowave.qqr(fit, coef = "all", digits = 3,
+                        include_grid_value = TRUE)
+head(row_means)
+```
+
+The object `row_means` contains the row wise averages \(\bar\beta_{k,i}\) across quantiles for each coefficient \(k\), summarising how the average effect varies along the support of the quantile regressor. The first two columns record the grid index and underlying grid value used to centre the local regressions.
+
+If a more compact representation is preferred, the grid values can be suppressed:
+
+```{r}
+## 4b. Row means without the grid values
+row_means_compact <- rowave.qqr(fit, coef = "all", digits = 3,
+                                include_grid_value = FALSE)
+head(row_means_compact)
+```
+
+In this case only the integer grid index and the row means are retained. This is useful when the grid locations are documented elsewhere or when the table is to be merged with other summaries by index.
+
+```{r}
+## 5a. Static 3D plot of the slope surface for X
+plot(fit, coef = "X", what = "coef", engine = "base")
+```
+
+This call plots the function \((z_i,\tau_j) \mapsto \hat\beta_{ij}\), providing a visual representation of how the marginal effect of `X` varies jointly across the distribution of \(X\) and the conditional quantiles of \(Y\).
+
+```{r, eval = FALSE}
+## 5b. Smooth 3D surface using surface3d()
+surface3d(fit, coef = "X",
+          palette        = "viridis",
+          add_zero_plane = TRUE,
+          clim           = c(-2, 2),
+          theta          = -30,
+          phi            = 25)
+```
+
+`surface3d()` plots the full raw coefficient matrix as a smooth coloured surface, equivalent to MATLAB's `surf()`. The `add_zero_plane = TRUE` option superimposes a translucent reference plane at \(z = 0\) to help identify regions where the coefficient changes sign. Setting `clim` to a fixed range ensures that colours are directly comparable if multiple surfaces are plotted side by side.
+
+```{r, eval = FALSE}
+## 5c. Ribbon panel plot using panel_surface()
+panel_surface(fit,
+              palette        = "RdBu",
+              add_zero_plane = TRUE)
+```
+
+`panel_surface()` displays one coloured flat panel per coefficient, side by side, on a shared colour scale. This layout matches the style of several published QQR studies and provides a compact overview of all coefficient surfaces simultaneously.
+
+```{r, eval = FALSE}
+## 5d. Interactive 3D surface using Int.plot()
+Int.plot(fit, coef = "X", what = "coef",
+         add_plane = TRUE, plane_z = 0)
+```
+
+```{r, eval = FALSE}
+## 6. Export all surfaces to Excel, including grid values
+excel.qqr(fit,
+          file               = "QQR_example.xlsx",
+          which              = "both",
+          include_grid_value = TRUE,
+          digits             = 3)
+```
+
+The Excel file produced by `excel.qqr()` contains a worksheet for each coefficient, with separate sheets for coefficient values and p values. The leading columns indicate the grid index and grid value. These tables preserve the link between coefficients, grid points and quantiles and can be imported into other software or included directly in reports.
+
+A more compact export that omits the grid values can also be requested:
+
+```{r, eval = FALSE}
+excel.qqr(fit,
+          file               = "QQR_example_compact.xlsx",
+          which              = "both",
+          include_grid_value = FALSE,
+          digits             = 3)
+```
+
+```{r, eval = FALSE}
+## 7a. Export coefficients and p-values for X to Word (separate tables)
+word.qqr(
+  fit,
+  file               = "QQR_X_surfaces.docx",
+  coef               = "X",
+  which              = "both",
+  digits             = 3,
+  include_grid_value = TRUE
+)
+
+## 7b. Export coefficients with significance stars (combined table)
+word.qqr(
+  fit,
+  file               = "QQR_X_stars.docx",
+  coef               = "X",
+  which              = "coef_stars",
+  digits             = 3,
+  include_grid_value = TRUE
+)
+```
+
+The `"coef_stars"` option produces a single publication-ready table with significance stars appended directly to each coefficient. P values that could not be computed are marked `[NA]` rather than left blank, and an automatic footnote is appended explaining the star conventions. This is the format most commonly used in empirical papers that report QQR results.
+
+```{r, eval = FALSE}
+## 8. Compare QR and row–mean QQR for X
+cmp_X <- compare.qqr(fit, coef = "X", digits = 3)
+head(cmp_X)
+```
+
+The object `cmp_X` has one row per quantile level `tau` and two coefficient columns,`qr` and `qqr_mean`. These correspond respectively to the standard QR estimate \(\hat\beta^{\mathrm{QR}}(\tau_k)\) and to the grid-averaged QQR estimate \(\hat{\bar\beta}(\tau_k)\) derived from the slope surface for `X`.
+
+```{r, eval = FALSE}
+## 9. Export QR–QQR comparisons to Excel and Word
+excel.compare.qqr(fit,
+                  file = "QQR_QR_comparison_X.xlsx",
+                  coef = "X",
+                  digits = 3)
+
+word.compare.qqr(fit,
+                 file  = "QQR_QR_comparison_X.docx",
+                 coef  = "X",
+                 digits = 3)
+```
+
+These helpers create compact comparison tables for inclusion in appendices or supplementary material that document how closely the averaged QQR effects track the standard QR coefficients across quantiles.
+
+```{r, message = FALSE}
+## 10. Plot QR and row–mean QQR coefficients for X
+# library(ggplot2)
+
+# p_X <- plot.compare.qqr(fit, coef = "X",
+#                        xlab = "Quantile level (tau)",
+#                        ylab = "Coefficient",
+#                        legend_title = "Model")
+
+# p_X
+```
+
+The resulting `ggplot` object displays two curves as functions of \(\tau\), one for the QR coefficients and one for the row–mean QQR coefficients. In simulated designs where the QQR model is correctly specified, the two curves should be close. In empirical applications, systematic deviations can signal that the richer QQR surface is detecting patterns that the global QR model overlooks.
+
+```{r, eval = FALSE}
+## 11. Inspect and customise the plot further if needed
+p_X + theme_minimal()
+```
+
+This completes a typical workflow from fitting a QQR model, through surface extraction and averaging, to QR–QQR comparison, export and visualisation using the tools provided in `qqr`.
+
+
+# References
+
+Fan, J. and Gijbels, I. (1996) *Local Polynomial Modelling and Its Applications*. London: Chapman & Hall.
+
+Hayfield, T. and Racine, J.S. (2008) Nonparametric econometrics: The np package. *Journal of Statistical Software*, 27(5), 1--32.
+
+Jones, M.C., Marron, J.S. and Sheather, S.J. (1996) A brief survey of bandwidth selection for density estimation. *Journal of the American Statistical Association*, 91(433), 401--407.
+
+Li, Q. and Racine, J.S. (2004) Cross-validated local linear nonparametric regression. *Biometrika*, 91(1), 639--643.
+
+Li, Q. and Racine, J.S. (2010) Smooth varying-coefficient estimation and inference for qualitative and quantitative data. *Econometric Theory*, 26(6), 1--31.
+
+Li, Q., Racine, J.S. and Wooldridge, J.M. (2002) Semiparametric estimation of partially linear models for dependent data with generated regressors. *Econometrica*, 70(5), 2123--2163.
+
+Ruppert, D., Sheather, S.J. and Wand, M.P. (1995) An effective bandwidth selector for local least squares regression. *Journal of the American Statistical Association*, 90(432), 1257--1270.
+
+Scott, D.W. (1992) *Multivariate Density Estimation: Theory, Practice, and Visualization*. New York: Wiley.
+
+Sheather, S.J. and Jones, M.C. (1991) A reliable data-based bandwidth selection method for kernel density estimation. *Journal of the Royal Statistical Society Series B*, 53(3), 683--690.
+
+Scott, D.W. (1992) *Multivariate Density Estimation: Theory, Practice, and Visualization*. New York: Wiley.
+
+Silverman, B.W. (1986) *Density Estimation for Statistics and Data Analysis*. London: Chapman & Hall.
+
+Koenker, R. (2005) *Quantile Regression*. Cambridge: Cambridge University Press.
+
+Koenker, R. and Bassett, G. (1978) Regression quantiles. *Econometrica*, 46(1), 33–50.
+
+Koenker, R. and Hallock, K.F. (2001) Quantile regression. *Journal of Economic Perspectives*, 15(4), 143–156.
+
+Shahzad, F., Shahzad, U., Fareed, Z., Iqbal, N., Hashmi, S.H. and Ahmad, F. (2020) Asymmetric nexus between temperature and COVID 19 in the top ten affected provinces of China: A current application of quantile on quantile approach. *Science of the Total Environment*, 736, 139115.
+
+Sim, N. and Zhou, H. (2015) Oil prices, US stock return and the dependence between their quantiles. *Journal of Banking & Finance*, 55, 1–8.
+
+Wu, D. (2023) The linkage between carbon market and green bond market: Evidence from a quantile on quantile regression approach. *Sustainability*, 15(13), 10634.
+
+Yu, K. and Jones, M.C. (1998) Local linear quantile regression. *Journal of the American Statistical Association*, 93(441), 228–237.

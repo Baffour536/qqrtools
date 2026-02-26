@@ -1,0 +1,83 @@
+Package: qqr
+Title: Quantile-on-Quantile Regression with Comprehensive Automatic Bandwidth Selection
+Version: 0.2.0
+Authors@R: c(
+    person(
+      "Collins Baffour", "Kyei",
+      email   = "collinskb536@gmail.com",
+      role    = c("aut", "cre"),
+      comment = c(ORCID = "0000-0002-4506-1865")
+    ),
+    person(
+      "William Godfred", "Cantah",
+      role    = "aut",
+      comment = c(ORCID = "0000-0002-9051-1327")
+    ),
+    person(
+      "Peterson", "Owusu Junior",
+      role    = "aut",
+      comment = c(ORCID = "0000-0001-6253-5770")
+    )
+  )
+Description: Implements quantile-on-quantile regression (QQR) as introduced
+    by Sim and Zhou (2015) <doi:10.1016/j.jbankfin.2015.02.030> for
+    exploring how the effect of a covariate varies jointly across the
+    conditional quantiles of a response and the quantiles of a designated
+    regressor. The main fitting function 'qqr()' uses local linear quantile
+    regression with Gaussian kernel weights to estimate coefficient and
+    p-value surfaces over user-specified grids of outcome and regressor
+    quantiles. Eight automatic bandwidth selection methods are provided to
+    promote reproducibility and remove researcher discretion over this
+    critical tuning parameter: Silverman's (1986) rule of thumb, a robust
+    IQR-corrected rule (Scott 1992), an IQR-scaled rule, a fast
+    leave-one-out cross-validation selector (Yu and Jones 1998, renamed
+    'cv_fast'), the Sheather-Jones solve-the-equation plug-in
+    (Sheather and Jones 1991, 'sj'), the Ruppert-Sheather-Wand direct
+    plug-in for local linear regression (Ruppert, Sheather and Wand 1995,
+    'yj'), np full least-squares cross-validation via 'npregbw()'
+    (Hayfield and Racine 2008, 'npcv'), and np smooth-coefficient
+    cross-validation via 'npscoefbw()' (Li and Racine 2010, 'sc').
+    The selected bandwidth, formula, numerical inputs and bibliographic
+    reference are stored in the fitted object and printed automatically.
+    Additional methods support printing and summarising QQR objects with
+    full bandwidth diagnostics, producing static and interactive
+    three-dimensional coefficient surfaces ('surface3d()',
+    'panel_surface()', 'plot.qqr()', 'Int.plot()'), extracting surfaces
+    as tidy tables ('qqr_surface()', 'rowave.qqr()'), exporting results
+    with significance stars to Excel and Word ('excel.qqr()',
+    'word.qqr()'), and comparing row-averaged QQR effects with standard
+    quantile regression coefficients ('compare.qqr()',
+    'plot.compare.qqr()', 'excel.compare.qqr()', 'word.compare.qqr()').
+    Core quantile regression algorithms use 'quantreg'
+    (Koenker 2005 <doi:10.1017/CBO9780511754098>). The 'sj' and
+    'yj' selectors require only base R or the recommended 'KernSmooth'
+    package; the 'npcv' and 'sc' selectors require the 'np' package.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.0.0)
+Imports:
+    graphics,
+    grDevices,
+    quantreg,
+    stats
+Suggests:
+    dplyr,
+    flextable,
+    ggplot2,
+    KernSmooth,
+    knitr,
+    np,
+    officer,
+    openxlsx,
+    plot3D,
+    rgl,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    tidyr
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+URL: https://github.com/CollinsBaffourKyei/qqr
+BugReports: https://github.com/CollinsBaffourKyei/qqr/issues
