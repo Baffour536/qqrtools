@@ -61,7 +61,8 @@ by `quantreg::rq()`.
 remotes::install_github("Baffour536/qqrtools")
 ```
 
-R ≥ 4.1 is required. Only *quantreg* is a hard dependency; plotting and
+R ≥ 4.1 is required (tested on the current, previous and development
+versions of R on Windows, macOS and Linux). Only *quantreg* is a hard dependency; plotting and
 export functions use *plot3D*, *rgl*, *plotly*, *ggplot2*, *openxlsx*,
 *officer* and *flextable* if they are installed.
 

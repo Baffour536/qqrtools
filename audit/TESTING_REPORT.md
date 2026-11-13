@@ -56,11 +56,9 @@ estimator, every exported function and all bandwidth rules except the
 The remaining note (CRAN incoming feasibility) is:
 
 * "New submission" – informational;
-* "possibly invalid URLs" `https://github.com/Baffour536/qqrtools`,
-  `…/issues` and the README badge – HTTP 404 because the repository was
-  still named `qqr` and private when the check ran. **This note resolves
-  when the repository is renamed and made public** (re-check listed in the
-  release report).
+* "possibly invalid URLs" for the GitHub links, reported while the
+  repository was still private. After publication
+  `urlchecker::url_check()` reports that all 9 URLs are correct.
 
 ## 4. Other checks
 
@@ -103,12 +101,13 @@ Cost is linear in m × K and roughly linear in n for the local fits;
 | Platform | Status |
 |---|---|
 | Windows 11, R 4.6.2 | all checks above executed locally |
-| macOS, Linux (R release, devel, oldrel-1, 4.1) | GitHub Actions workflow `R-CMD-check.yaml` added; **not yet executed** – it runs on the first push. Result to be recorded in `RELEASE_REPORT.md`. |
-| Clean environment | the CI runners start from an empty library; the local hard-dependency-only check above is the local evidence. Installation from GitHub with `remotes::install_github()` is verified after publication (see release report). |
+| GitHub Actions `R-CMD-check` | passed on macOS (R release), Windows (R release) and Ubuntu (R devel, release, oldrel-1); the coverage job also passed |
+| R 4.1 on Ubuntu | not tested: current CRAN versions of the dependencies could not be installed on R 4.1 on the CI runner, so that job was removed |
+| Clean environment | the CI runners start from an empty library; `remotes::install_github("Baffour536/qqrtools")` into an empty library followed by the README quick start succeeded on Windows |
 
 ## 7. Not executed
 
 * `lintr` was installed but not used as a release gate: the code base uses a
   consistent but non-tidyverse style, and style lints are not defects.
-* Tests on macOS and Linux and on R 4.1 – pending the CI run.
+* Tests on R 4.1 (see section 6).
 * Visual inspection of every generated figure.
