@@ -1,3 +1,7 @@
 ^qqr\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
+^qqr_[0-9].*\.tar\.gz$
+^qqrtools_[0-9].*\.tar\.gz$
+^cran-comments\.md$
+^tests/testthat/Rplots\.pdf$

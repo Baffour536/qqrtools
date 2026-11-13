@@ -399,7 +399,7 @@ word.qqr <- function(x,
     # Significance note
     doc <- officer::body_add_par(
       doc,
-      "Notes: Entries report quantile-on-quantile regression coefficients. Significance stars denote p-values obtained from local quantile regressions: *** p<0.01, ** p<0.05, * p<0.10. \u2020 indicates that p-values could not be computed at the corresponding grid–quantile combination.",
+      "Notes: Entries report quantile-on-quantile regression coefficients. Significance stars denote p-values obtained from local quantile regressions: *** p<0.01, ** p<0.05, * p<0.10. \u2020 indicates that p-values could not be computed at the corresponding grid-quantile combination.",
       style="Normal"
     )
   }

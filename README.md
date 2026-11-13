@@ -1,4 +1,4 @@
-# qqr: Quantile-on-Quantile Regression in R
+# qqrtools: Tools for Quantile-on-Quantile Regression
 
 <!-- badges: start -->
 <!-- badges: end -->
@@ -89,7 +89,7 @@ regression problem.
 ## Quick start
 
 ```r
-library(qqr)
+library(qqrtools)
 
 set.seed(42)
 n   <- 300
@@ -143,7 +143,7 @@ intentionally or not, choose `h` to obtain more favourable results, free
 bandwidth selection is a form of specification searching that undermines the
 credibility of QQR findings.
 
-`qqr` makes automatic selection the default and stores the method and full
+`qqrtools` makes automatic selection the default and stores the method and full
 formula in the fitted object so it can be reported transparently:
 
 ```r

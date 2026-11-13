@@ -1,6 +1,6 @@
-#' qqr: Quantile-on-Quantile Regression
+#' qqrtools: Tools for Quantile-on-Quantile Regression
 #'
-#' The **qqr** package provides tools for estimating and analysing
+#' The **qqrtools** package provides tools for estimating and analysing
 #' *quantile–on–quantile regression* (QQR) surfaces. QQR extends standard
 #' quantile regression by modelling the response at multiple conditional
 #' quantile levels of a *quantile regressor*, evaluated over a grid of
@@ -116,7 +116,7 @@
 #' - `plot3D` and `rgl` (optional) for enhanced plotting
 #'
 #' @docType package
-#' @name qqr
+#' @name qqrtools
 #' @importFrom stats setNames
 #' @importFrom graphics par layout persp polygon text axis box image
 #' @importFrom grDevices hcl.colors adjustcolor

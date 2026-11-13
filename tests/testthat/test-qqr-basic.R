@@ -21,7 +21,7 @@
 ## qqr object at fit time; but the test fix below matches your current core.
 
 library(testthat)
-library(qqr)
+library(qqrtools)
 
 ## ----------------------------------------------------------------------
 ## Helper: deterministic DGP
@@ -126,7 +126,7 @@ test_that(".qqr_match_coef maps user-facing names correctly and rejects internal
     )
   )
 
-  matcher <- getFromNamespace(".qqr_match_coef", "qqr")
+  matcher <- getFromNamespace(".qqr_match_coef", "qqrtools")
 
   ## Intercept aliases accepted
   expect_identical(matcher(fit, "(Intercept)"), "(Intercept)")

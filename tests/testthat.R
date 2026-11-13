@@ -7,6 +7,6 @@
 # * https://testthat.r-lib.org/articles/special-files.html
 
 library(testthat)
-library(qqr)
+library(qqrtools)
 
-test_check("qqr")
+test_check("qqrtools")

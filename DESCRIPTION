@@ -1,6 +1,6 @@
-Package: qqr
-Title: Quantile-on-Quantile Regression in R
-Version: 0.2.0
+Package: qqrtools
+Title: Tools for Quantile-on-Quantile Regression
+Version: 0.1.0
 Authors@R: c(
     person(
       "Collins Baffour", "Kyei",
@@ -17,6 +17,11 @@ Authors@R: c(
       "Peterson", "Owusu Junior",
       role    = "aut",
       comment = c(ORCID = "0000-0001-6253-5770")
+    ),
+    person(
+        "Dominic", "Owusu Abeyie",
+        role = "aut",
+        comment = c(ORCID = "0009-0007-9335-4543")
     )
   )
 Description: Implements quantile-on-quantile regression (QQR) as introduced
@@ -30,8 +35,8 @@ Description: Implements quantile-on-quantile regression (QQR) as introduced
     promote reproducibility and remove researcher discretion over this
     critical tuning parameter: Silverman's (1986) rule of thumb, a robust
     IQR-corrected rule (Scott 1992), an IQR-scaled rule, a fast
-    leave-one-out cross-validation selector (Yu and Jones 1998, renamed
-    'cv_fast'), the Sheather-Jones solve-the-equation plug-in
+    leave-one-out cross-validation selector (Yu and Jones 1998, 'cv_fast'),
+    the Sheather-Jones solve-the-equation plug-in
     (Sheather and Jones 1991, 'sj'), the Ruppert-Sheather-Wand direct
     plug-in for local linear regression (Ruppert, Sheather and Wand 1995,
     'yj'), np full least-squares cross-validation via 'npregbw()'
@@ -39,32 +44,50 @@ Description: Implements quantile-on-quantile regression (QQR) as introduced
     cross-validation via 'npscoefbw()' (Li and Racine 2010, 'sc').
     The selected bandwidth, formula, numerical inputs and bibliographic
     reference are stored in the fitted object and printed automatically.
-    Additional methods support printing and summarising QQR objects with
-    full bandwidth diagnostics, producing static and interactive
-    three-dimensional coefficient surfaces ('surface3d()',
-    'panel_surface()', 'plot.qqr()', 'Int.plot()'), extracting surfaces
-    as tidy tables ('qqr_surface()', 'rowave.qqr()'), exporting results
-    with significance stars to Excel and Word ('excel.qqr()',
-    'word.qqr()'), and comparing row-averaged QQR effects with standard
-    quantile regression coefficients ('compare.qqr()',
-    'plot.compare.qqr()', 'excel.compare.qqr()', 'word.compare.qqr()').
-    Core quantile regression algorithms use 'quantreg'
-    (Koenker 2005 <doi:10.1017/CBO9780511754098>). The 'sj' and
-    'yj' selectors require only base R or the recommended 'KernSmooth'
-    package; the 'npcv' and 'sc' selectors require the 'np' package.
+    A comprehensive visualisation suite covers every major display type
+    for QQR surfaces: static and interactive three-dimensional perspective
+    plots ('surface3d()', 'panel_surface()', 'plot.qqr()', 'Int.plot()');
+    publication-ready two-dimensional heatmaps with optional significance
+    star overlays and symmetric zero-centred colour scaling
+    ('qqr_heatmap()'); filled contour plots with automatic zero-contour
+    highlighting and significance masking ('qqr_contour()'); a unified
+    interactive plotly hub supporting 3D surface, heatmap and contour
+    display types in a single function ('qqr_plotly()'); and a quantile
+    dependence heatmap ('qqr_cor_heatmap()') that characterises the
+    bivariate dependence structure between the response and the quantile
+    regressor across a joint quantile grid using six dependence measures:
+    Spearman rank correlation (Spearman 1904), Kendall's tau-b
+    (Kendall 1938), Somers' asymmetric D statistic (Somers 1962),
+    Pearson linear correlation, Blomqvist's medial beta
+    (Blomqvist 1950), and co-exceedance probability, a tail-dependence
+    measure widely used in financial contagion research. The dependence
+    heatmap supports both a subsample mode, which computes measures on
+    the actual data values within each joint quantile cell, and a binary
+    indicator mode that replicates the approach of Roudane (2026).
+    Additional methods support extracting surfaces as tidy tables
+    ('qqr_surface()', 'rowave.qqr()'), exporting results with significance
+    stars to Excel and Word ('excel.qqr()', 'word.qqr()'), and comparing
+    row-averaged QQR effects with standard quantile regression coefficients
+    ('compare.qqr()', 'plot.compare.qqr()', 'excel.compare.qqr()',
+    'word.compare.qqr()'). Core quantile regression algorithms use
+    'quantreg' (Koenker 2005 <doi:10.1017/CBO9780511754098>). Static
+    heatmap and contour functions require 'ggplot2'; the interactive
+    'qqr_plotly()' requires 'plotly'. The 'sj' and 'yj' bandwidth
+    selectors require only base R or the recommended 'KernSmooth' package;
+    the 'npcv' and 'sc' selectors require the 'np' package.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.3
 Depends:
-    R (>= 4.0.0)
+    R (>= 4.1.0)
 Imports:
+    dplyr,
     graphics,
     grDevices,
     quantreg,
-    stats
+    stats,
+    tidyr
 Suggests:
-    dplyr,
     flextable,
     ggplot2,
     KernSmooth,
@@ -76,8 +99,9 @@ Suggests:
     rgl,
     rmarkdown,
     testthat (>= 3.0.0),
-    tidyr
+    plotly
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 URL: https://github.com/CollinsBaffourKyei/qqr
 BugReports: https://github.com/CollinsBaffourKyei/qqr/issues
+Config/roxygen2/version: 8.0.0

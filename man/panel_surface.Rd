@@ -20,9 +20,10 @@ panel_surface(x, ...)
   border = "grey30",
   add_zero_plane = FALSE,
   zero_plane_col = "red",
+  clim = NULL,
   main = NULL,
   zlab = NULL,
-  cex_names = 0.75,
+  cex_names = 0.95,
   digits = 2,
   legend = TRUE,
   ...
@@ -76,6 +77,14 @@ identifying sign changes in coefficient surfaces. Default is
 \item{zero_plane_col}{Colour of the zero-reference plane when
 \code{add_zero_plane = TRUE}. Default is \code{"red"}.}
 
+\item{clim}{Numeric vector of length 2, \code{c(min, max)}, giving the
+shared colour and z-axis limits applied to every panel.  If
+\code{NULL} (default) the limits are computed automatically
+as the range of all finite values across all displayed
+surfaces, ensuring a common scale.  Supply a fixed value
+(e.g. \code{clim = c(-0.5, 0.5)}) to make plots from
+different models visually comparable.}
+
 \item{main}{Optional character string for the overall plot title.
 If \code{NULL} a default title is constructed.}
 
@@ -105,6 +114,9 @@ colour of each panel encodes the coefficient magnitude using a
 continuous palette. This style closely matches the visualisation
 convention introduced in applied QQR research for displaying multiple
 coefficient surfaces simultaneously.
+Plots one 3D coefficient (or p-value) surface per coefficient side by side
+in a single figure, sharing a common colour scale and z-axis so that all
+panels are directly visually comparable.
 }
 \details{
 For each requested coefficient, the function extracts the row mean of
