@@ -62,11 +62,6 @@ quantities if the QR model is well specified. For the intercept they are
 not directly comparable: the local intercept is the fitted
 \eqn{\tau}-quantile of \eqn{Y} at \eqn{X = x^\theta}, while the QR
 intercept is evaluated at \eqn{X = 0}.
-
-Earlier versions (\pkg{qqr} 0.2.0) instead averaged each surface over
-\eqn{\tau} and paired grid point \eqn{j} with \eqn{\tau_j}, which does
-not correspond to the Sim and Zhou comparison; results from those
-versions should be recomputed.
 }
 \examples{
 set.seed(1)

@@ -40,14 +40,10 @@ if (requireNamespace("qqrtools", quietly = TRUE)) {
 }
 ```
 
-> **Note on version 0.3.0.** This vignette describes `qqrtools` 0.3.0
-> (formerly `qqr`). Most code chunks are shown but not run when the
-> vignette is built, because they open graphics devices or write files; the
-> worked example in Section 6 runs. The executable introduction is in
-> `vignette("qqrtools")`. Version 0.3.0 changes the default grid to the
-> empirical quantiles of the regressor, adds the Sim-Zhou
-> empirical-CDF kernel (`kernel_space = "cdf"`) and corrects
-> `compare.qqr()` and the `"cv_fast"` bandwidth; see `NEWS.md`.
+> **Note.** Most code chunks in this vignette are shown but not run when
+> the vignette is built, because they open graphics devices or write
+> files; the worked example in Section 6 runs. The executable
+> introduction is in `vignette("qqrtools")`.
 
 # 1. Motivation and overview
 
@@ -207,7 +203,7 @@ denote a grid of values in the support of \(X\). By default (`grid = "quantile"`
 z_i = \hat Q_X(\theta_i), \qquad
 \theta_i = 0.05 + \frac{i-1}{m-1}\,0.90, \quad i = 1,\ldots,m,
 \]
-or at user-supplied levels `thetas`. With `grid = "range"` (the only option in `qqr` 0.2.0) the grid consists of \(m\) equally spaced points between the sample minimum and maximum,
+or at user-supplied levels `thetas`. With `grid = "range"` the grid consists of \(m\) equally spaced points between the sample minimum and maximum,
 \[
 z_i
 =
@@ -312,7 +308,7 @@ h_{\text{CV}}
 \rho_{0.5}\!\left(Y_t - \hat Q_{-t}(0.5 \mid X_t;\, h)\right),
 $$
 where \(\mathcal{H}\) is a 15-point search grid spanning
-\([0.5\,h_{\text{Silverman}},\; 2\,h_{\text{Silverman}}]\). Check-loss cross-validation for kernel quantile regression follows Yu and Jones (1998). The criterion is computed at \(\tau = 0.5\) for a local-constant predictor, so it is a pragmatic, data-driven choice rather than an optimal bandwidth for every \(\tau\) or for the local slope; its cost grows with \(n^2\). (In `qqr` 0.2.0 this selector predicted \(X_t\) from the other values of \(X\) and ignored \(Y\); that has been corrected.)
+\([0.5\,h_{\text{Silverman}},\; 2\,h_{\text{Silverman}}]\). Check-loss cross-validation for kernel quantile regression follows Yu and Jones (1998). The criterion is computed at \(\tau = 0.5\) for a local-constant predictor, so it is a pragmatic, data-driven choice rather than an optimal bandwidth for every \(\tau\) or for the local slope; its cost grows with \(n^2\).
 
 ### Sheather-Jones solve-the-equation plug-in (`h = "sj"`) {-}
 
@@ -941,8 +937,6 @@ When a single coefficient is requested, `compare.qqr()` returns a data frame wit
 - `difference`: `qqr_mean - qr`.
 
 For the intercept the two columns are not directly comparable: the local intercept is the fitted \(\tau\)-quantile of \(Y\) at \(Z = z_m\), whereas the QR intercept refers to \(Z = 0\).
-
-In `qqr` 0.2.0 this function averaged each surface over \(\tau\) (row means) and paired grid point \(m\) with \(\tau_m\); that did not implement the comparison described here and has been corrected.
 
 When multiple coefficients are requested, the function returns a named list of such data frames, with one element per coefficient. This format is convenient for exporting and plotting coefficient-specific comparisons.
 
@@ -1643,8 +1637,7 @@ D_{ij}(Y \mid X)
 \]
 where \(T^{*}_{Y,ij}\) is the number of pairs tied on \(Y\) but not on
 \(X\), so that the denominator counts all pairs whose \(X\) values
-differ (Somers, 1962). (Versions before 0.3.0 used the pairs tied on
-\(X\) instead, which gives \(D(X \mid Y)\).) Because \(D(Y|X) \neq D(X|Y)\), Somers'
+differ (Somers, 1962). Because \(D(Y|X) \neq D(X|Y)\), Somers'
 D is directional — it measures the degree to which knowing that one unit
 has a higher \(X\) value than another predicts that the same unit also has
 a higher \(Y\) value. This asymmetry directly mirrors QQR's own structure,

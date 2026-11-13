@@ -12,11 +12,6 @@ The answer is a two-dimensional surface β(θ, τ) that can reveal
 asymmetric, tail-specific or state-dependent relationships which a single
 QR slope averages away.
 
-> **Formerly `qqr`.** The package was renamed from `qqr` to `qqrtools` in
-> version 0.3.0. Replace `library(qqr)` with `library(qqrtools)`; function
-> names are unchanged. Version 0.3.0 also corrects the estimation grid and
-> `compare.qqr()` – see [What changed in 0.3.0](#what-changed-in-030).
-
 ## What the package estimates
 
 For each grid point x<sup>θ</sup> (by default the empirical θ-quantile of
@@ -133,23 +128,6 @@ fit_sz <- qqr(y ~ x + w, data = dat, qvar = "x",
   are not optimal for QQR slopes. Rules of the form h ∝ n<sup>−1/5</sup>,
   such as Silverman's, can give noisy slope surfaces. Report *h* and check
   how sensitive the results are to it (see the methodology vignette).
-
-## What changed in 0.3.0
-
-| Area | 0.2.0 (`qqr`) | 0.3.0 (`qqrtools`) |
-|------|---------------|--------------------|
-| Package name | `qqr` | `qqrtools` |
-| Grid | equally spaced over the range of *X*, but labelled as quantiles 0.05–0.95 in plots | empirical θ-quantiles of *X* (`grid = "quantile"`); old grid via `grid = "range"` |
-| `compare.qqr()` | averaged over τ and paired grid point *j* with τ<sub>j</sub> | averages over θ for each τ (Sim–Zhou comparison) |
-| `cv_fast` | cross-validated a median of *x* itself (ignored *y*) | leave-one-out check-loss CV of *y* given *x* |
-| Factor controls, transformed regressors (`log(x)`) | silently produced `NA` surfaces | estimated correctly |
-| Plotly colour scales | reversed (negative values shown red) | negative = blue, positive = red |
-| Somers' D | used ties on *X* in the denominator | correct D(Y\|X) |
-| Kernel space | *X* only | *X* or empirical CDF (`kernel_space = "cdf"`) |
-| `dplyr`, `tidyr` | imported | no longer needed |
-
-Results produced with `qqr` 0.2.0 should be re-estimated. See
-[NEWS.md](NEWS.md) for the full list.
 
 ## Documentation
 

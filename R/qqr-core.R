@@ -36,8 +36,8 @@
 #' empirical quantiles \eqn{x^\theta = \hat Q_X(\theta)} at
 #' \code{thetas} (by default \code{m} equally spaced levels from 0.05 to
 #' 0.95), as in Sim and Zhou (2015). With \code{grid = "range"} the grid is
-#' \code{m} equally spaced values between \code{min(X)} and \code{max(X)};
-#' this was the only behaviour of \pkg{qqr} 0.2.0 and earlier. In both cases
+#' \code{m} equally spaced values between \code{min(X)} and \code{max(X)}.
+#' In both cases
 #' the stored \code{thetas} are the quantile levels of the grid points
 #' (for \code{"range"}, the empirical CDF evaluated at the grid).
 #'
@@ -101,7 +101,7 @@
 #'   \code{stats::na.omit}.
 #' @param grid Either \code{"quantile"} (default; grid at empirical
 #'   quantiles of the quantile regressor) or \code{"range"} (equally spaced
-#'   over its range, the behaviour of \pkg{qqr} 0.2.0).
+#'   over its range).
 #' @param thetas Optional strictly increasing vector of quantile levels in
 #'   \eqn{(0, 1)} for the grid when \code{grid = "quantile"}. Defaults to
 #'   \code{seq(0.05, 0.95, length.out = m)}.
@@ -567,7 +567,7 @@ qqr <- function(formula,
       "(Intercept)" %in% all_names)
     return("(Intercept)")
   if (identical(coef, x$independent) && "z" %in% all_names)
-    return("z")   ## objects created by qqr <= 0.1
+    return("z")   ## legacy alias
   stop("Coefficient '", coef, "' not recognised. Available: ",
        paste(.qqr_user_coefs(x), collapse = ", "), call. = FALSE)
 }
@@ -581,7 +581,7 @@ qqr <- function(formula,
 }
 
 ## Quantile levels of the grid points, also for objects fitted with
-## qqr 0.2.0 (which did not store them).
+## an earlier development version (which did not store them).
 ## @noRd
 .qqr_thetas <- function(x) {
   if (!is.null(x$thetas)) return(x$thetas)

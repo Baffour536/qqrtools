@@ -6,8 +6,7 @@ data-handling path is listed. "Tests" names the test files in
 `math` = `test-math-reference.R`, `val` = `test-validation.R`,
 `plots` = `test-plots-dependence.R`, `mx` = `test-methods-export.R`).
 "Mathematical validation" describes the independent reference against which
-results are compared. Status: **Verified** = reviewed, corrected where
-needed, and tested against an independent reference; **Verified (run)** =
+results are compared. Status: **Verified** = reviewed and tested against an independent reference; **Verified (run)** =
 reviewed and tested for correct structure/behaviour (graphics and file
 output, where there is no numerical reference); **Partial** = see note.
 
@@ -48,11 +47,11 @@ output, where there is no numerical reference); **Partial** = see note.
 | `.qqr_kernel()` | Gaussian kernel | math, mx | `dnorm` | Verified |
 | `.qqr_ecdf_ranks()` | Empirical CDF F_n(X_t) | math | Equals `ecdf(x)(x)` | Verified |
 | `.qqr_check_probs()` | Validate taus/thetas | val | Error cases | Verified |
-| `.qqr_match_coef()`, `.qqr_user_coefs()`, `.qqr_resolve_coefs()` | Map user names to surfaces | basic, val, plots, mx | Intercept aliases, old `"z"` alias, errors | Verified |
-| `.qqr_thetas()` | Grid quantile levels (also for 0.2.0 objects) | val, plots | Equals ECDF at grid for old objects | Verified |
+| `.qqr_match_coef()`, `.qqr_user_coefs()`, `.qqr_resolve_coefs()` | Map user names to surfaces | basic, val, plots, mx | Intercept aliases, legacy `"z"` alias, errors | Verified |
+| `.qqr_thetas()` | Grid quantile levels (also for fits without stored thetas) | val, plots | Equals ECDF at grid when thetas are not stored | Verified |
 | `.qqr_get_surface()` | Extract a surface; error on empty p-values | plots | Error message for `se_type = "none"` | Verified |
-| `.qqr_design()` | Design matrix for `compare.qqr` (also old objects) | val | Same QR as stored design | Verified |
-| `.qqr_somers_d()` | Somers' D(Y\|X) | plots | Brute-force definition with ties; equals Kendall tau-a without ties | Verified (corrected) |
+| `.qqr_design()` | Design matrix for `compare.qqr` (also fits without a stored design) | val | Same QR as stored design | Verified |
+| `.qqr_somers_d()` | Somers' D(Y\|X) | plots | Brute-force definition with ties; equals Kendall tau-a without ties | Verified |
 | `.qqr_blomqvist()` | Blomqvist's beta | plots | Sign definition | Verified |
 | `.qqr_coexceedance()` | Joint exceedance probability | plots | Empirical mean | Verified |
 | `.qqr_cell_stat()` | Dispatch of dependence measures | plots | via the above | Verified |
@@ -61,9 +60,3 @@ output, where there is no numerical reference); **Partial** = see note.
 | `.qqr_trans3d()` | Projection for zero planes | plots | Used by drawn zero planes (visual) | Verified (run) |
 | `.qqr_h_label()` | Labels for print methods | mx | All methods | Verified |
 
-## Removed
-
-| Function | Reason |
-|---|---|
-| duplicate `.qqr_match_coef()` in `qqr-methods.R` | Silently overrode the version in `qqr-core.R` (collation order); one definition kept |
-| `.qqr_lprq_point()` | Replaced by `.qqr_local_fit()` (formula-safe names, failure accounting) |

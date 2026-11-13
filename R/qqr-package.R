@@ -28,14 +28,6 @@
 #'   \item{Export}{\code{\link{excel.qqr}} and \code{\link{word.qqr}}.}
 #' }
 #'
-#' @section Migrating from qqr:
-#' The package was previously called \pkg{qqr}. Replace
-#' \code{library(qqr)} with \code{library(qqrtools)}; function names are
-#' unchanged. Version 0.3.0 changes the default grid to empirical quantiles
-#' of the regressor and corrects \code{compare.qqr()}; use
-#' \code{grid = "range"} to reproduce the grid of \pkg{qqr} 0.2.0. See
-#' \code{NEWS.md} for details.
-#'
 #' @references
 #' Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
 #' dependence between their quantiles. \emph{Journal of Banking & Finance},

@@ -165,7 +165,7 @@ test_that("p-value types ker and boot run; boot is reproducible with a seed", {
   expect_true(all(is.na(fn$pval_surfaces$x)))
 })
 
-test_that("objects from qqr 0.2.0 (no thetas/design) still work", {
+test_that("fits without stored thetas/design still work", {
   dat <- .ls_data(n = 100, seed = 23)
   fit <- .qfit(y ~ x + w, dat, qvar = "x", taus = c(0.3, 0.7), m = 3,
                grid = "range", h = 0.2)

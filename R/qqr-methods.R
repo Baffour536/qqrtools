@@ -533,7 +533,7 @@ Int.plot.qqr <- function(x,
 #'
 #' This function uses only base R graphics (\pkg{grDevices} and
 #' \pkg{graphics}) and has no additional package dependencies beyond
-#' those already required by \pkg{qqr}.
+#' those already required by \pkg{qqrtools}.
 #'
 #' @return
 #' The function is called for its side effect of producing a 3D plot.

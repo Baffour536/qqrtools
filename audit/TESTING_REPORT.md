@@ -8,9 +8,9 @@ Environment for all local results: Windows 11 Pro (build 26300), R 4.6.2
 
 | File | Test blocks | Expectations | Failed | Skipped |
 |---|---|---|---|---|
-| `test-qqr-basic.R` (original suite, kept as regression tests) | 15 | 137 | 0 | 0 |
+| `test-qqr-basic.R` (structure and workflow tests) | 15 | 137 | 0 | 0 |
 | `test-math-reference.R` (independent reference calculations) | 10 | 96 | 0 | 0 |
-| `test-validation.R` (inputs, edge cases, formula handling, selectors, SE types, 0.2.0 objects) | 13 | 75 | 0 | 0 |
+| `test-validation.R` (inputs, edge cases, formula handling, selectors, SE types, legacy objects) | 13 | 75 | 0 | 0 |
 | `test-plots-dependence.R` (graphics, colour scales, dependence measures) | 8 | 56 | 0 | 0 |
 | `test-methods-export.R` (print/summary, tables, Excel/Word, bandwidth edge cases) | 9 | 63 | 0 | 0 |
 | **Total** | **55** | **427** | **0** | **0** |
@@ -18,10 +18,7 @@ Environment for all local results: Windows 11 Pro (build 26300), R 4.6.2
 Without `NOT_CRAN` (as on CRAN), the *np*- and *rgl*-based tests are
 skipped.
 
-The original suite (137 expectations) passed unchanged against the new
-code, except that one error-message pattern was kept by adapting the new
-message (`"must be numeric"`). No test was weakened to make it pass; tests
-that compare against independent results use tolerances of 1e-8 (exact
+Tests that compare against independent results use tolerances of 1e-8 (exact
 algorithms) or explicitly justified statistical tolerances
 (location-scale recovery).
 
@@ -44,8 +41,7 @@ export (files read back and contents checked).
 Uncovered lines are defensive branches that cannot be reached with valid
 inputs or need an unavailable configuration: missing optional packages
 (`requireNamespace()` failure messages), failure fallbacks of *np*
-selectors, "all local fits non-unique" message, the `"z"` alias of objects
-created by versions before 0.2.0, and `stop()` calls for degenerate design
+selectors, "all local fits non-unique" message, a legacy `"z"` coefficient alias, and `stop()` calls for degenerate design
 matrices that `model.frame()` already prevents. All numerical paths of the
 estimator, every exported function and all bandwidth rules except the
 *np* failure branches are covered.
@@ -54,7 +50,6 @@ estimator, every exported function and all bandwidth rules except the
 
 | Run | Command | Result |
 |---|---|---|
-| Baseline (GitHub/local 0.1.0 code before changes) | `rcmdcheck(args = c("--as-cran", "--no-manual"))` | 0 errors, 0 warnings, 1 note (invalid URLs, invalid DOI) |
 | Release candidate | `rcmdcheck(args = "--as-cran")` incl. PDF manual, examples, tests, vignettes | **0 errors, 0 warnings, 1 note** |
 | Release candidate, hard dependencies only | `_R_CHECK_DEPENDS_ONLY_=true`, `--no-tests --ignore-vignettes` | 0 errors, 0 warnings, 0 notes (examples run without any Suggests package) |
 

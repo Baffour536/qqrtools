@@ -50,11 +50,6 @@ compare <- function(x, ...) {
 #' \eqn{\tau}-quantile of \eqn{Y} at \eqn{X = x^\theta}, while the QR
 #' intercept is evaluated at \eqn{X = 0}.
 #'
-#' Earlier versions (\pkg{qqr} 0.2.0) instead averaged each surface over
-#' \eqn{\tau} and paired grid point \eqn{j} with \eqn{\tau_j}, which does
-#' not correspond to the Sim and Zhou comparison; results from those
-#' versions should be recomputed.
-#'
 #' @return For a single coefficient, a data frame with columns \code{tau},
 #'   \code{qr} (QR coefficient), \code{qqr_mean} (QQR average over the
 #'   grid) and \code{difference} (\code{qqr_mean - qr}). For several
@@ -166,7 +161,7 @@ compare.qqr <- function(x,
   out
 }
 
-## Response and uncentred design matrix of a fit (also for qqr 0.2.0
+## Response and uncentred design matrix of a fit (also for fitted
 ## objects, which did not store them).
 ## @noRd
 .qqr_design <- function(x) {

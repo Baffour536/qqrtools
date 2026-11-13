@@ -133,7 +133,7 @@ effects change sign.
 
 This function uses only base R graphics (\pkg{grDevices} and
 \pkg{graphics}) and has no additional package dependencies beyond
-those already required by \pkg{qqr}.
+those already required by \pkg{qqrtools}.
 }
 \examples{
 set.seed(1)

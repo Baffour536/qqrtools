@@ -21,7 +21,7 @@ with ρ<sub>τ</sub>(u) = u(τ − 1{u < 0}), Gaussian *K*, and
 
 Grid: x<sup>θ</sup> = Q̂<sub>X</sub>(θ) (type-7 sample quantile) at
 `thetas` (default `seq(0.05, 0.95, length.out = m)`), or `m` equally
-spaced points over [min X, max X] (`grid = "range"`, the 0.2.0 behaviour).
+spaced points over [min X, max X] (`grid = "range"`).
 The weighted problem is solved exactly by `quantreg::rq(method = "br")`.
 P-values are those of `quantreg::summary.rq(se = se_type)` for the weighted
 problem.
@@ -33,13 +33,13 @@ regression of *Y* on X<sub>t</sub> − X<sup>θ</sup> with weights
 K((F<sub>n</sub>(X<sub>t</sub>) − θ)/h), at θ on a grid, with h = 0.05,
 and compare the θ-average of β̂<sub>1</sub>(θ, τ) with the QR slope.
 
-| Element | Sim and Zhou (2015) | qqrtools 0.2.0 | qqrtools 0.3.0 |
-|---|---|---|---|
-| Location of local fits | sample θ-quantiles of X | equally spaced over range (labelled as quantiles) | θ-quantiles (default); range optional |
-| Kernel distance | F<sub>n</sub>(X<sub>t</sub>) − θ | X<sub>t</sub> − x | X<sub>t</sub> − x (default) or F<sub>n</sub>(X<sub>t</sub>) − θ |
-| Local regressor | X<sub>t</sub> − X<sup>θ</sup> | same | same |
-| Controls | not in the original model (bivariate) | linear, local coefficients | linear, local coefficients |
-| QR comparison | average over θ for each τ | average over τ, paired by index (wrong) | average over θ for each τ |
+| Element | Sim and Zhou (2015) | qqrtools |
+|---|---|---|
+| Location of local fits | sample θ-quantiles of X | θ-quantiles (default); equally spaced range optional |
+| Kernel distance | F<sub>n</sub>(X<sub>t</sub>) − θ | X<sub>t</sub> − x (default) or F<sub>n</sub>(X<sub>t</sub>) − θ |
+| Local regressor | X<sub>t</sub> − X<sup>θ</sup> | same |
+| Controls | not in the original model (bivariate) | linear, with local coefficients |
+| QR comparison | average over θ for each τ | average over θ for each τ (`compare.qqr()`) |
 
 With `grid = "quantile"`, `kernel_space = "cdf"` and `h = 0.05` (and no
 controls) `qqr()` implements the Sim–Zhou estimator. The default
@@ -151,7 +151,7 @@ cells; per-cell rates in the summary file):
   results are reproducible with `set.seed()` (tested).
 * No claim is made that these p-values are valid for the nonparametric
   surface: they ignore smoothing bias, data-driven bandwidths and
-  multiplicity. The documentation (help page, README, both vignettes) now
+  multiplicity. The documentation (help page, README, both vignettes)
   says so.
 * No uniform confidence bands, bias correction, or bandwidth selection
   tailored to QQR are provided.
@@ -160,8 +160,7 @@ cells; per-cell rates in the summary file):
 
 Spearman, Kendall and Pearson use `stats::cor()`; Somers' D(Y|X),
 Blomqvist's β and co-exceedance use internal code checked against
-brute-force definitions. Somers' D was corrected (it previously computed
-D(X|Y)). Co-exceedance is now P̂(X ≥ Q̂<sub>X</sub>(τ<sub>i</sub>),
+brute-force definitions. Co-exceedance is now P̂(X ≥ Q̂<sub>X</sub>(τ<sub>i</sub>),
 Y ≥ Q̂<sub>Y</sub>(τ<sub>j</sub>)) with benchmark (1 − τ<sub>i</sub>)(1 − τ<sub>j</sub>).
 Within-cell correlations are computed on the observations falling into
 each joint quantile cell. Because the cells truncate both variables, these
@@ -178,7 +177,7 @@ Within the scope tested, the evidence supports the following:
   implements the Sim and Zhou (2015) estimator; the default configuration
   is the closely related Yu–Jones local linear estimator evaluated at the
   regressor's quantiles;
-* `compare.qqr()` now implements the Sim–Zhou robustness check;
+* `compare.qqr()` implements the Sim–Zhou robustness check;
 * the estimator behaves as theory predicts (unbiased under an exact local
   model, boundary bias and bias–variance trade-off otherwise);
 * p-values are approximate, pointwise and should be treated as descriptive.

@@ -163,7 +163,7 @@ test_that("Kish effective sample sizes are stored per grid point", {
   }
 })
 
-test_that("grid = 'range' reproduces the qqr 0.2.0 grid", {
+test_that("grid = 'range' gives an equally spaced grid with ECDF thetas", {
   dat <- .ls_data(n = 120, seed = 20)
   fit <- .qfit(y ~ x, data = dat, taus = 0.5, m = 4, h = 0.2,
                grid = "range", se_type = "none")
