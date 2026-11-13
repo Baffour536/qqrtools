@@ -198,6 +198,33 @@
         fmt(h)))
     },
 
+    ## 9. Slope-oriented rule of thumb: n^(-1/7) rate of local polynomial
+    ##    first-derivative estimation (Fan and Gijbels 1996), robust scale.
+    slope = {
+      scale <- min(s, iqr / 1.34)
+      if (!is.finite(scale) || scale <= 0) scale <- s
+      C <- .qqr_slope_constant()
+      h <- C * scale * n^(-1 / 7)
+      list(h = h, details = paste0(
+        "Slope-oriented rule of thumb [h = ", C,
+        " * min(sd, IQR/1.34) * n^(-1/7)]; rate from Fan and Gijbels ",
+        "(1996), constant calibrated by simulation. sd = ", fmt(s),
+        ", IQR = ", fmt(iqr), ", n = ", n, ", h = ", fmt(h)))
+    },
+
+    ## 10. cv_fast inflated from the level rate n^(-1/5) to the slope rate
+    ##     n^(-1/7).
+    cv_slope = {
+      needs_y()
+      h0 <- .qqr_select_h(x, y, "cv_fast", kernel)$h
+      h  <- h0 * n^(1 / 5 - 1 / 7)
+      list(h = h, details = paste0(
+        "Leave-one-out check-loss cross-validation at tau = 0.5 (h_cv = ",
+        fmt(h0), ") multiplied by n^(1/5 - 1/7) to move from the level ",
+        "rate to the slope rate; Yu and Jones (1998), Fan and Gijbels ",
+        "(1996). n = ", n, ", h = ", fmt(h)))
+    },
+
     stop("Unknown bandwidth method '", method, "'. Use one of: ",
          paste(.qqr_h_methods(), collapse = ", "),
          ", or a single positive number.", call. = FALSE)
@@ -212,15 +239,22 @@
 
 ## Names of the automatic bandwidth methods.
 .qqr_h_methods <- function() {
-  c("silverman", "robust", "iqr", "cv_fast", "sj", "yj", "npcv", "sc")
+  c("slope", "cv_slope", "silverman", "robust", "iqr", "cv_fast", "sj",
+    "yj", "npcv", "sc")
 }
 
 ## Methods that use the outcome y.
-.qqr_h_needs_y <- function() c("cv_fast", "yj", "npcv", "sc")
+.qqr_h_needs_y <- function() c("cv_slope", "cv_fast", "yj", "npcv", "sc")
+
+## Constant of the slope-oriented rule of thumb (calibrated in
+## tools/validation/bandwidth_calibration.R).
+.qqr_slope_constant <- function() 2
 
 ## Human-readable label for print methods.
 .qqr_h_label <- function(method) {
   labs <- c(
+    slope     = "Slope-oriented rule of thumb",
+    cv_slope  = "Check-loss CV, slope rate",
     silverman = "Silverman's rule of thumb",
     robust    = "Robust rule of thumb",
     iqr       = "IQR-based rule",

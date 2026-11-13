@@ -1,3 +1,38 @@
+# qqrtools 0.4.0
+
+## Bandwidth and bias
+
+* New default bandwidth rule `h = "slope"`:
+  h = 2 * min(sd, IQR/1.34) * n^(-1/7). It uses the rate that is optimal
+  for local slopes (Fan and Gijbels, 1996); the constant was calibrated by
+  simulation (`tools/validation/bandwidth_calibration.R`). The previous
+  default, `"silverman"`, is a density bandwidth that under-smooths slopes
+  and remains available.
+* New rule `h = "cv_slope"`: the cross-validated bandwidth of `"cv_fast"`
+  rescaled to the slope rate.
+* New argument `degree` in `qqr()`: `2` (default) fits a local quadratic
+  model, which removes the first-order bias of the local linear slope at
+  the low and high quantiles of the regressor; `1` gives the local linear
+  estimator of Sim and Zhou (2015).
+* Results obtained with version 0.3.0 defaults are reproduced with
+  `h = "silverman", degree = 1, se_type = "nid"`.
+
+## Inference
+
+* The default standard-error type is now `se_type = "ker"` instead of
+  `"nid"`. In null simulations with the default bandwidth and degree, 5%
+  tests rejected in 3.5-4.4% of cells with `"ker"`, about 5% with `"boot"`
+  and 7-9% with `"nid"` (`tools/validation/size_default.R`). `"boot"` is
+  recommended for final results.
+
+## Robustness tools
+
+* `qqr_sensitivity()` refits a model over a range of bandwidths and
+  summarises the stability of the surface (with `print()` and `plot()`
+  methods).
+* `qqr_padjust()` adjusts the p-value surfaces for the number of cells
+  tested (`stats::p.adjust()`; Benjamini-Hochberg by default).
+
 # qqrtools 0.3.0
 
 First public release.

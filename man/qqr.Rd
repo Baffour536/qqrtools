@@ -10,14 +10,15 @@ qqr(
   qvar = NULL,
   taus = seq(0.05, 0.95, by = 0.05),
   m = 19L,
-  h = "silverman",
+  h = "slope",
   kernel = c("gaussian"),
-  se_type = c("nid", "ker", "boot", "none"),
+  se_type = c("ker", "nid", "boot", "none"),
   ...,
   na.action = stats::na.omit,
   grid = c("quantile", "range"),
   thetas = NULL,
-  kernel_space = c("x", "cdf")
+  kernel_space = c("x", "cdf"),
+  degree = 2L
 )
 }
 \arguments{
@@ -37,13 +38,13 @@ levels in \eqn{(0, 1)}. Default \code{seq(0.05, 0.95, by = 0.05)}.}
 \code{thetas} is supplied. Default \code{19}.}
 
 \item{h}{Bandwidth: a single positive number or the name of an automatic
-rule (see Details). Default \code{"silverman"}.}
+rule (see Details). Default \code{"slope"}.}
 
 \item{kernel}{Kernel function. Only \code{"gaussian"} is implemented.}
 
 \item{se_type}{Standard-error type passed to
-\code{\link[quantreg]{summary.rq}}: \code{"nid"} (default),
-\code{"ker"}, \code{"boot"} or \code{"none"}.}
+\code{\link[quantreg]{summary.rq}}: \code{"ker"} (default),
+\code{"nid"}, \code{"boot"} or \code{"none"}.}
 
 \item{...}{Further arguments passed to \code{\link[quantreg]{summary.rq}}
 (for example \code{R} when \code{se_type = "boot"}).}
@@ -62,6 +63,9 @@ over its range).}
 \item{kernel_space}{Either \code{"x"} (default; kernel on
 \eqn{X_t - x^\theta}) or \code{"cdf"} (kernel on
 \eqn{F_n(X_t) - \theta}, as in Sim and Zhou, 2015).}
+
+\item{degree}{Degree of the local polynomial in the quantile regressor:
+\code{2} (local quadratic, default) or \code{1} (local linear).}
 }
 \value{
 An object of class \code{"qqr"}: a list with components
@@ -84,8 +88,8 @@ per coefficient.}
 \item{\code{coef_names}}{Coefficient names.}
 \item{\code{bandwidth}, \code{h_method}, \code{h_details}}{The
 bandwidth, its selection method and a reporting description.}
-\item{\code{grid_type}, \code{kernel_space}, \code{kernel},
-\code{se_type}}{Estimation settings.}
+\item{\code{grid_type}, \code{kernel_space}, \code{degree},
+\code{kernel}, \code{se_type}}{Estimation settings.}
 \item{\code{effective_n}}{\eqn{m \times K} matrix of Kish effective
 local sample sizes \eqn{(\sum w)^2 / \sum w^2}.}
 \item{\code{n_failed}}{Number of local fits that failed (their cells
@@ -98,7 +102,7 @@ matrix, used by \code{\link{compare.qqr}}.}
 }
 \description{
 Fits a quantile-on-quantile regression (QQR) model (Sim and Zhou, 2015)
-by running a sequence of kernel-weighted local linear quantile
+by running a sequence of kernel-weighted local polynomial quantile
 regressions of a dependent variable \eqn{Y} on a designated quantile
 regressor \eqn{X} and optional control variables \eqn{W}. The local
 regressions are evaluated at a grid of locations of \eqn{X} (by default
@@ -142,22 +146,53 @@ of \eqn{X}, as in local linear quantile regression (Yu and Jones,
 probability scale (Sim and Zhou use \eqn{h = 0.05}) and automatic
 selectors are applied to the ranks \eqn{F_n(X_t)}.
 
+\strong{Local polynomial degree (\code{degree}).}
+With \code{degree = 1} the problem above (local linear) is solved, as
+in Sim and Zhou (2015). With \code{degree = 2} (default) the term
+\eqn{\delta (X_t - x^\theta)^2} is added to the local model (local
+quadratic). The slope is a first derivative; the local linear slope has
+a bias of order \eqn{h} near the boundary of the support of \eqn{X},
+whereas the local quadratic slope has a bias of order \eqn{h^2}
+everywhere, which is why an odd difference between polynomial degree
+and derivative order is recommended (Fan and Gijbels, 1996). The
+coefficient \eqn{\hat\delta} is not stored.
+
 \strong{Bandwidth (\code{h}).}
 Either a single positive number (a reproducibility warning is issued) or
-one of the automatic rules: \code{"silverman"} (default),
-\code{"robust"}, \code{"iqr"}, \code{"cv_fast"}, \code{"sj"},
-\code{"yj"}, \code{"npcv"} or \code{"sc"}. The rules are density- or
-mean-regression bandwidths applied to the smoothing variable; they are
-transparent, reproducible defaults rather than optimal bandwidths for
-the QQR surface itself. \code{"yj"} needs \pkg{KernSmooth};
-\code{"npcv"} and \code{"sc"} need \pkg{np}. See the methodology
-vignette for formulas and references.
+one of the automatic rules.
+\itemize{
+\item \code{"slope"} (default): \eqn{h = C\,\hat\sigma\,n^{-1/7}}
+with \eqn{\hat\sigma = \min(\mathrm{sd}, \mathrm{IQR}/1.34)}. The
+variance of a local slope is of order \eqn{1/(n h^3)}, so its
+optimal bandwidth is of order \eqn{n^{-1/7}} (Fan and Gijbels,
+1996), wider than the \eqn{n^{-1/5}} of density and level
+estimation. The constant \eqn{C} was calibrated by simulation; see
+the methodology vignette.
+\item \code{"cv_slope"}: the cross-validated bandwidth of
+\code{"cv_fast"} multiplied by \eqn{n^{1/5 - 1/7}}, a rate
+adjustment from level to slope estimation.
+\item \code{"silverman"}, \code{"robust"}, \code{"iqr"},
+\code{"sj"}: density bandwidths of order \eqn{n^{-1/5}}.
+\item \code{"cv_fast"}, \code{"yj"}, \code{"npcv"}, \code{"sc"}:
+bandwidths for estimating the level of a regression function.
+}
+The \eqn{n^{-1/5}} rules under-smooth slopes and give noisy surfaces.
+\code{"yj"} needs \pkg{KernSmooth}; \code{"npcv"} and \code{"sc"} need
+\pkg{np}. No rule is optimal for every data set: use
+\code{\link{qqr_sensitivity}} to check that conclusions are stable
+across bandwidths.
 
 \strong{Inference.}
 P-values are those reported by \code{\link[quantreg]{summary.rq}} for
-the weighted local problem with \code{se = se_type}. They are pointwise
+the weighted local problem with \code{se = se_type}. In simulations
+without any effect, 5\\% tests based on \code{"ker"} (Powell kernel
+sandwich, the default) rejected in 3.5--4.4\\% of the cells, those based
+on \code{"boot"} in about 5\\%, and those based on \code{"nid"} in
+7--9\\%; \code{"boot"} is therefore recommended for final results (see
+the methodology vignette). All p-values are pointwise
 and do not account for bandwidth selection, smoothing bias or the
-multiplicity of grid cells; treat them as descriptive. Use
+multiplicity of grid cells; treat them as descriptive
+(\code{\link{qqr_padjust}} adjusts them for multiplicity). Use
 \code{se_type = "none"} to skip them (faster). With
 \code{se_type = "boot"} results depend on the random number generator;
 call \code{set.seed()} first.
@@ -187,11 +222,14 @@ round(fit$qcoef, 2)
 ## Sim and Zhou (2015) weighting on the empirical-CDF scale
 fit_sz <- suppressWarnings(
   qqr(y ~ x + w, data = dat, qvar = "x", taus = c(0.25, 0.5, 0.75),
-      m = 5, kernel_space = "cdf", h = 0.05)
+      m = 5, kernel_space = "cdf", h = 0.05, degree = 1)
 )
 
 }
 \references{
+Fan, J. and Gijbels, I. (1996) \emph{Local Polynomial Modelling and Its
+Applications}. London: Chapman & Hall.
+
 Koenker, R. and Bassett, G. (1978) Regression quantiles.
 \emph{Econometrica}, 46(1), 33--50. \doi{10.2307/1913643}
 

@@ -1,6 +1,6 @@
 Package: qqrtools
 Title: Tools for Quantile-on-Quantile Regression
-Version: 0.3.0
+Version: 0.4.0
 Authors@R: c(
     person(
       "Collins Baffour", "Kyei",
@@ -29,15 +29,17 @@ Description: Estimates quantile-on-quantile regression (QQR) models in the
     which describe how the effect of a designated regressor on the
     conditional quantiles of a response varies across the quantiles of that
     regressor. The fitting function 'qqr()' runs Gaussian-kernel weighted
-    local linear quantile regressions (Yu and Jones 1998
+    local quadratic or local linear quantile regressions (Yu and Jones 1998
     <doi:10.1080/01621459.1998.10474104>) at a grid of empirical quantiles
     of the regressor, with optional control variables, kernel weights on
     either the regressor scale or the empirical distribution function scale
     of Sim and Zhou, and pointwise p-values from 'quantreg'. Automatic
-    bandwidth rules (Silverman, robust and IQR rules of thumb, check-loss
+    bandwidth rules (a slope-oriented rule of thumb, Silverman, robust and
+    IQR rules of thumb, check-loss
     cross-validation, Sheather-Jones and Ruppert-Sheather-Wand plug-ins, and
     'np' cross-validation) are stored with a reporting description. Further
-    tools compare the regressor-averaged QQR surface with standard quantile
+    tools assess the sensitivity of the surface to the bandwidth, adjust
+    p-values for the number of cells tested, compare the regressor-averaged QQR surface with standard quantile
     regression, extract and export surfaces to tables, 'Excel' and 'Word',
     draw static and interactive three-dimensional surfaces, heatmaps and
     contour plots, and summarise the bivariate quantile dependence of the

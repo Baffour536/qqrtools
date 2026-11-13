@@ -15,7 +15,7 @@ QR slope averages away.
 ## What the package estimates
 
 For each grid point x<sup>θ</sup> (by default the empirical θ-quantile of
-*X*) and each τ, `qqr()` solves the kernel-weighted local linear quantile
+*X*) and each τ, `qqr()` solves a kernel-weighted local quantile
 regression
 
 min over (α, β, γ) of Σ<sub>t</sub> ρ<sub>τ</sub>( Y<sub>t</sub> − α − β (X<sub>t</sub> − x<sup>θ</sup>) − γ′W<sub>t</sub> ) · K(d<sub>t</sub> / h),
@@ -29,17 +29,29 @@ d<sub>t</sub> = F<sub>n</sub>(X<sub>t</sub>) − θ
 probability scale, Sim and Zhou use h = 0.05). Each local problem is solved
 by `quantreg::rq()`.
 
+By default the local model also contains the term δ (X<sub>t</sub> −
+x<sup>θ</sup>)² (`degree = 2`, local quadratic). The slope is a derivative,
+and a local quadratic fit removes the first-order bias that a local linear
+slope has at the low and high quantiles of *X* (Fan and Gijbels, 1996).
+`degree = 1` gives the local linear estimator of Sim and Zhou.
+
 ## Features
 
 - **Estimation** – `qqr()` returns coefficient and p-value surfaces for the
   intercept, the quantile regressor and every control (numeric or factor),
   with the grid, its θ levels, Kish effective local sample sizes and a
   record of failed local fits.
-- **Bandwidth rules** – `"silverman"` (default), `"robust"`, `"iqr"`,
+- **Bandwidth rules** – `"slope"` (default; h = 2 · min(sd, IQR/1.34) ·
+  n<sup>−1/7</sup>, the rate that is optimal for local slopes), `"cv_slope"`
+  (cross-validation rescaled to that rate), `"silverman"`, `"robust"`, `"iqr"`,
   `"cv_fast"` (leave-one-out check-loss cross-validation), `"sj"`
   (Sheather–Jones), `"yj"` (Ruppert–Sheather–Wand, needs *KernSmooth*),
   `"npcv"` and `"sc"` (need *np*), or a number. The chosen rule and a
   sentence for your methods section are stored in the fit.
+- **Robustness** – `qqr_sensitivity()` refits the surface over a range of
+  bandwidths and reports how stable it is; `qqr_padjust()` adjusts the
+  p-value surfaces for the number of cells tested (Benjamini–Hochberg by
+  default).
 - **Comparison with QR** – `compare.qqr()` averages the surface over θ for
   each τ and compares it with `quantreg::rq()` (Sim and Zhou's robustness
   check); `plot.compare.qqr()`, `excel.compare.qqr()`, `word.compare.qqr()`.
@@ -105,12 +117,22 @@ if (requireNamespace("openxlsx", quietly = TRUE)) {
 }
 ```
 
-### The Sim–Zhou weighting
+### The Sim–Zhou estimator
+
+Local linear fit, kernel on the empirical-CDF scale and a manual bandwidth:
 
 ```r
 fit_sz <- qqr(y ~ x + w, data = dat, qvar = "x",
               taus = seq(0.1, 0.9, by = 0.1), m = 9,
-              kernel_space = "cdf", h = 0.05)   # warns: manual bandwidth
+              kernel_space = "cdf", degree = 1,
+              h = 0.05)                         # warns: manual bandwidth
+```
+
+### Robustness checks
+
+```r
+qqr_sensitivity(fit)            # surface over 0.5x to 2x the bandwidth
+fit_adj <- qqr_padjust(fit)     # p-values adjusted for the number of cells
 ```
 
 ## Interpreting the output
@@ -122,13 +144,17 @@ fit_sz <- qqr(y ~ x + w, data = dat, qvar = "x",
   *X* = x<sup>θ</sup> and *W* = 0; control surfaces are local effects of
   the controls.
 - P-values are **pointwise** results from `quantreg::summary.rq()` for each
-  weighted local problem. They ignore bandwidth selection, smoothing bias and
-  the many cells tested, so treat them as descriptive.
-- Results depend on the bandwidth. Automatic rules make the choice
-  reproducible, but they come from density or mean-regression theory and
-  are not optimal for QQR slopes. Rules of the form h ∝ n<sup>−1/5</sup>,
-  such as Silverman's, can give noisy slope surfaces. Report *h* and check
-  how sensitive the results are to it (see the methodology vignette).
+  weighted local problem. They ignore bandwidth selection and smoothing
+  bias, so treat them as descriptive. In simulations without any effect,
+  5% tests rejected in 3.5–4.4% of cells with the default `se_type = "ker"`,
+  about 5% with `"boot"` (recommended for final results) and 7–9% with
+  `"nid"`. Use `qqr_padjust()` to adjust for the many cells tested.
+- Results depend on the bandwidth. The default rule uses the
+  n<sup>−1/7</sup> rate of slope estimation with a constant calibrated by
+  simulation; rules of the form h ∝ n<sup>−1/5</sup>, such as Silverman's,
+  come from density estimation and give noisy slope surfaces. No rule is
+  optimal for every data set: report *h* and run `qqr_sensitivity()` (see
+  the methodology vignette).
 
 ## Documentation
 
@@ -156,6 +182,14 @@ citation("qqrtools")
 Please also cite Sim and Zhou (2015) for the QQR method.
 
 ## References
+
+Benjamini, Y. and Hochberg, Y. (1995) Controlling the false discovery rate:
+a practical and powerful approach to multiple testing. *Journal of the Royal
+Statistical Society: Series B*, 57(1), 289–300.
+doi:10.1111/j.2517-6161.1995.tb02031.x
+
+Fan, J. and Gijbels, I. (1996) *Local Polynomial Modelling and Its
+Applications*. London: Chapman & Hall.
 
 Koenker, R. (2005) *Quantile Regression*. Cambridge University Press.
 doi:10.1017/CBO9780511754098

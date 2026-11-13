@@ -1,4 +1,4 @@
-# Testing report – qqrtools 0.3.0
+# Testing report – qqrtools 0.4.0
 
 Environment for all local results: Windows 11 Pro (build 26300), R 4.6.2
 (ucrt), quantreg 6.1, testthat 3e, roxygen2 8.1.1, devtools 2.5.2, covr
@@ -13,7 +13,8 @@ Environment for all local results: Windows 11 Pro (build 26300), R 4.6.2
 | `test-validation.R` (inputs, edge cases, formula handling, selectors, SE types, legacy objects) | 13 | 75 | 0 | 0 |
 | `test-plots-dependence.R` (graphics, colour scales, dependence measures) | 8 | 56 | 0 | 0 |
 | `test-methods-export.R` (print/summary, tables, Excel/Word, bandwidth edge cases) | 9 | 63 | 0 | 0 |
-| **Total** | **55** | **427** | **0** | **0** |
+| `test-bandwidth-degree.R` (local quadratic fit, slope bandwidth rules, sensitivity analysis, p-value adjustment) | 7 | 113 | 0 | 0 |
+| **Total** | **62** | **540** | **0** | **0** |
 
 Without `NOT_CRAN` (as on CRAN), the *np*- and *rgl*-based tests are
 skipped.
@@ -32,11 +33,12 @@ export (files read back and contents checked).
 |---|---|
 | R/qqr-utils.R | 98.6 % |
 | R/qqr-export.R | 98.0 % |
-| R/qqr-core.R | 94.1 % |
-| R/qqr-methods.R | 93.4 % |
-| R/qqr-bandwidth.R | 89.8 % |
+| R/qqr-robustness.R | 100.0 % |
+| R/qqr-core.R | 94.6 % |
+| R/qqr-methods.R | 93.5 % |
+| R/qqr-bandwidth.R | 91.1 % |
 | R/qqr-qr.R | 89.3 % |
-| **Total** | **93.7 %** |
+| **Total** | **94.1 %** |
 
 Uncovered lines are defensive branches that cannot be reached with valid
 inputs or need an unavailable configuration: missing optional packages
@@ -50,15 +52,11 @@ estimator, every exported function and all bandwidth rules except the
 
 | Run | Command | Result |
 |---|---|---|
-| Release candidate | `rcmdcheck(args = "--as-cran")` incl. PDF manual, examples, tests, vignettes | **0 errors, 0 warnings, 1 note** |
-| Release candidate, hard dependencies only | `_R_CHECK_DEPENDS_ONLY_=true`, `--no-tests --ignore-vignettes` | 0 errors, 0 warnings, 0 notes (examples run without any Suggests package) |
+| Version 0.4.0 | `rcmdcheck(args = "--as-cran")` incl. PDF manual, examples, tests, vignettes | **0 errors, 0 warnings, 0 notes** |
 
-The remaining note (CRAN incoming feasibility) is:
-
-* "New submission" – informational;
-* "possibly invalid URLs" for the GitHub links, reported while the
-  repository was still private. After publication
-  `urlchecker::url_check()` reports that all 9 URLs are correct.
+The hard-dependencies-only run (`_R_CHECK_DEPENDS_ONLY_=true`) was carried
+out for version 0.3.0 and not repeated for 0.4.0; version 0.4.0 adds no
+dependency (the new functions use only *stats* and *graphics*).
 
 ## 4. Other checks
 
@@ -73,10 +71,13 @@ The remaining note (CRAN incoming feasibility) is:
 | Developer paths | none in package files (`grep` for `C:/Users`, `OneDrive`, `/home/`) |
 | Reproducibility | all tests and examples set seeds; bootstrap p-values reproducible with `set.seed()` (tested) |
 | Monte Carlo study | `tools/validation/simulation.R`, 52 settings × 200 replications, results in `tools/validation/simulation_summary.md` |
+| Calibration of defaults | `tools/validation/bandwidth_calibration.R` (3 designs × 2 sample sizes × up to 16 rule–degree combinations × 200 replications) and `tools/validation/size_default.R` (2 null designs × 2 sample sizes × 3 standard-error types × 300 replications); results in the `.md` files beside the scripts |
 
 ## 5. Performance (`tools/validation/benchmark.R`, single core)
 
-m = K = 19 (361 local fits), one control:
+m = K = 19 (361 local fits), one control, local linear fit (`degree = 1`);
+timings measured for version 0.3.0 and not repeated. The default local
+quadratic fit estimates one more coefficient per cell:
 
 | n | h | se_type | seconds |
 |---|---|---|---|
@@ -101,9 +102,9 @@ Cost is linear in m × K and roughly linear in n for the local fits;
 | Platform | Status |
 |---|---|
 | Windows 11, R 4.6.2 | all checks above executed locally |
-| GitHub Actions `R-CMD-check` | passed on macOS (R release), Windows (R release) and Ubuntu (R devel, release, oldrel-1); the coverage job also passed |
+| GitHub Actions `R-CMD-check` | runs on macOS (R release), Windows (R release) and Ubuntu (R devel, release, oldrel-1) for every push, together with a coverage job; see the Actions tab of the repository for the status of the current commit |
 | R 4.1 on Ubuntu | not tested: current CRAN versions of the dependencies could not be installed on R 4.1 on the CI runner, so that job was removed |
-| Clean environment | the CI runners start from an empty library; `remotes::install_github("Baffour536/qqrtools")` into an empty library followed by the README quick start succeeded on Windows |
+| Clean environment | the CI runners start from an empty library; `remotes::install_github("Baffour536/qqrtools")` into an empty library followed by the README quick start succeeded on Windows for version 0.3.0 |
 
 ## 7. Not executed
 

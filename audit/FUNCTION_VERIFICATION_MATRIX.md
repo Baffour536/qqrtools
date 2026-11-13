@@ -1,10 +1,11 @@
-# Function verification matrix – qqrtools 0.3.0
+# Function verification matrix – qqrtools 0.4.0
 
 Every exported function and every internal function on a numerical or
 data-handling path is listed. "Tests" names the test files in
 `tests/testthat/` that exercise the function (`basic` = `test-qqr-basic.R`,
 `math` = `test-math-reference.R`, `val` = `test-validation.R`,
-`plots` = `test-plots-dependence.R`, `mx` = `test-methods-export.R`).
+`plots` = `test-plots-dependence.R`, `mx` = `test-methods-export.R`,
+`bd` = `test-bandwidth-degree.R`).
 "Mathematical validation" describes the independent reference against which
 results are compared. Status: **Verified** = reviewed and tested against an independent reference; **Verified (run)** =
 reviewed and tested for correct structure/behaviour (graphics and file
@@ -14,7 +15,7 @@ output, where there is no numerical reference); **Partial** = see note.
 
 | Function | Purpose | Tests | Mathematical validation | Status |
 |---|---|---|---|---|
-| `qqr()` | Fit QQR surfaces by kernel-weighted local linear quantile regression | basic, math, val, mx | Every cell equals a direct `quantreg::rq(weights=)` fit (coefficients and `nid` p-values, tol 1e-8); Sim–Zhou CDF weights recomputed by hand; huge-h limit equals global QR; noiseless linear model recovered exactly; location-scale slope recovered; Monte Carlo study (audit/ECONOMETRIC_VALIDATION_REPORT.md) | Verified |
+| `qqr()` | Fit QQR surfaces by kernel-weighted local quadratic or local linear quantile regression | basic, math, val, mx, bd | Every cell equals a direct `quantreg::rq(weights=)` fit for `degree = 1` and `degree = 2` (coefficients and `nid` p-values, tol 1e-8); noiseless quadratic recovered exactly with `degree = 2`; Sim–Zhou CDF weights recomputed by hand; huge-h limit equals global QR; noiseless linear model recovered exactly; location-scale slope recovered; Monte Carlo study (audit/ECONOMETRIC_VALIDATION_REPORT.md) | Verified |
 | `print.qqr()` | Console summary of a fit | basic, mx, val | Output content checked (grid type, kernel space, bandwidth label) | Verified (run) |
 | `summary.qqr()` | Global slope-surface summaries | basic, mx | `row_means`/`col_means` equal `rowMeans`/`colMeans` of `qcoef` | Verified |
 | `print.summary.qqr()` | Print a `summary.qqr` | mx | Output content checked | Verified (run) |
@@ -36,12 +37,16 @@ output, where there is no numerical reference); **Partial** = see note.
 | `qqr_plotly()` | plotly surface/heatmap/contour hub | plots | as above | Verified (run) |
 | `qqr_cor_heatmap()` | Quantile dependence heatmap | plots | Cell Spearman recomputed by hand; bin breaks; co-exceedance and its independence benchmark recomputed; binary-mode Pearson recomputed | Verified |
 | `print.qqr_cor_heatmap()` | Print dependence summary | plots | Output checked | Verified (run) |
+| `qqr_sensitivity()` | Refit a surface over several bandwidths and summarise its stability | bd | Factor 1 reproduces the fit; other bandwidths equal manual refits (tol 1e-10); summary statistics recomputed; kernel space and degree preserved | Verified |
+| `print.qqr_sensitivity()`, `plot.qqr_sensitivity()` | Print and plot the sensitivity summary | bd | Output checked; plot runs on a null device | Verified (run) |
+| `qqr_padjust()` | Multiplicity-adjusted p-value surfaces | bd | Equal to `stats::p.adjust()` on each surface; coefficients unchanged; double adjustment refused | Verified |
 
 ## Internal functions
 
 | Function | Purpose | Tests | Mathematical validation | Status |
 |---|---|---|---|---|
-| `.qqr_select_h()` | Eight bandwidth rules | math, val, mx | Silverman, robust, IQR equal closed forms; `sj` equals `bw.SJ`; `yj` equals `KernSmooth::dpill`; `cv_fast` equals a brute-force LOO check-loss minimiser; error and fallback branches | Verified (`npcv`, `sc`: run only, results are those of *np*) |
+| `.qqr_select_h()` | Ten bandwidth rules | math, val, mx, bd | `slope` equals 2·min(sd, IQR/1.34)·n^(−1/7); `cv_slope` equals `cv_fast`·n^(1/5−1/7); Silverman, robust, IQR equal closed forms; `sj` equals `bw.SJ`; `yj` equals `KernSmooth::dpill`; `cv_fast` equals a brute-force LOO check-loss minimiser; error and fallback branches | Verified (`npcv`, `sc`: run only, results are those of *np*) |
+| `.qqr_surfaces()` | All local fits for one bandwidth (shared by `qqr()` and `qqr_sensitivity()`) | math, bd | via `qqr()` reference tests | Verified |
 | `.qqr_local_fit()` | One weighted local `rq()` fit with p-values | math, mx | Equal to direct `rq()`; failure paths (rank deficiency, Kish ESS < p+1, solver error) | Verified |
 | `.qqr_kish()` | Kish effective sample size | math, mx | Equals (Σw)²/Σw² | Verified |
 | `.qqr_kernel()` | Gaussian kernel | math, mx | `dnorm` | Verified |

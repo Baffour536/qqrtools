@@ -6,7 +6,8 @@ test_that("each surface cell equals a directly computed weighted rq() fit", {
   dat <- .ls_data(n = 250, seed = 11)
   taus <- c(0.2, 0.5, 0.8)
   h <- 0.15
-  fit <- .qfit(y ~ x + w, data = dat, qvar = "x", taus = taus, m = 4, h = h)
+  fit <- .qfit(y ~ x + w, data = dat, qvar = "x", taus = taus, m = 4, h = h,
+               degree = 1, se_type = "nid")
 
   expect_equal(fit$grid,
                unname(stats::quantile(dat$x, fit$thetas, type = 7)))
@@ -35,7 +36,7 @@ test_that("kernel_space = 'cdf' uses Sim-Zhou weights K((F_n(X) - theta)/h)", {
   dat <- .ls_data(n = 200, seed = 12)
   h <- 0.1
   fit <- .qfit(y ~ x, data = dat, taus = c(0.3, 0.7), thetas = c(0.25, 0.75),
-               h = h, kernel_space = "cdf", se_type = "none")
+               h = h, kernel_space = "cdf", se_type = "none", degree = 1)
   Fn <- stats::ecdf(dat$x)(dat$x)
   for (i in 1:2) {
     th <- fit$thetas[i]
@@ -54,7 +55,7 @@ test_that("with a huge bandwidth, QQR collapses to standard QR", {
   dat  <- .ls_data(n = 300, seed = 13)
   taus <- c(0.25, 0.5, 0.75)
   fit  <- .qfit(y ~ x + w, data = dat, qvar = "x", taus = taus, m = 5,
-                h = 1e6, se_type = "none")
+                h = 1e6, se_type = "none", degree = 1)
   qr <- stats::coef(quantreg::rq(y ~ x + w, data = dat, tau = taus))
   for (i in seq_len(5)) {
     expect_equal(unname(fit$qcoef[i, ]), unname(qr["x", ]), tolerance = 1e-6)
@@ -83,12 +84,11 @@ test_that("a noiseless linear model is recovered exactly at every cell", {
 test_that("the location-scale slope 2 + 0.5 qnorm(tau) is recovered", {
   ## The local linear model is exact for this DGP, so the estimator is
   ## unbiased for any h; a moderately wide h keeps the variance small.
-  ## (With the density-oriented Silverman rule, h is ~0.06 here and the
-  ## local slopes are much noisier; see ECONOMETRIC_VALIDATION_REPORT.md.)
   dat  <- .ls_data(n = 4000, seed = 15)
   taus <- c(0.25, 0.5, 0.75)
   fit  <- .qfit(y ~ x + w, data = dat, qvar = "x", taus = taus,
-                thetas = c(0.25, 0.5, 0.75), h = 0.3, se_type = "none")
+                thetas = c(0.25, 0.5, 0.75), h = 0.3, se_type = "none",
+                degree = 1)
   truth <- matrix(2 + 0.5 * stats::qnorm(taus), nrow = 3, ncol = 3,
                   byrow = TRUE)
   expect_lt(max(abs(fit$qcoef - truth)), 0.35)

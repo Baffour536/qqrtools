@@ -4,7 +4,7 @@
 #' \pkg{qqrtools} estimates quantile-on-quantile regression (QQR) surfaces
 #' (Sim and Zhou, 2015): the effect of the \eqn{\theta}-quantile of a
 #' regressor \eqn{X} on the \eqn{\tau}-quantile of a response \eqn{Y},
-#' obtained from kernel-weighted local linear quantile regressions.
+#' obtained from kernel-weighted local polynomial quantile regressions.
 #'
 #' @section Main functions:
 #' \describe{
@@ -14,6 +14,9 @@
 #'   \item{Summaries}{\code{print}, \code{\link{summary.qqr}},
 #'     \code{\link{qqr_surface}} (wide or long tables) and
 #'     \code{\link{rowave.qqr}} (averages over \eqn{\tau}).}
+#'   \item{Robustness}{\code{\link{qqr_sensitivity}} refits the surface over
+#'     a range of bandwidths; \code{\link{qqr_padjust}} adjusts the p-value
+#'     surfaces for the number of cells tested.}
 #'   \item{Comparison with QR}{\code{\link{compare.qqr}} averages each
 #'     surface over \eqn{\theta} and compares it with standard quantile
 #'     regression; \code{\link{plot.compare.qqr}},

@@ -48,7 +48,12 @@ print.qqr <- function(x, ...) {
   cat("Quantile levels     : ", paste(x$taus, collapse = " "), "\n")
   cat("Kernel              : ", x$kernel,
       if (kspace == "cdf") "on F_n(x) - theta" else "on x - grid value", "\n")
+  cat("Local polynomial    : ",
+      if (identical(x$degree, 2L)) "quadratic (degree 2)" else
+        "linear (degree 1)", "\n")
   cat("SE type             : ", x$se_type, "\n")
+  if (!is.null(x$p_adjust))
+    cat("P-value adjustment  : ", x$p_adjust, "\n")
   cat(sprintf("Bandwidth h         :  %.6g  [%s]\n", x$bandwidth,
               .qqr_h_label(x$h_method)))
   if (!is.null(x$h_method) && x$h_method == "manual")
@@ -142,7 +147,9 @@ summary.qqr <- function(object, ...) {
     h_method    = object$h_method,
     h_details   = object$h_details,
     kernel      = object$kernel,
+    degree      = if (is.null(object$degree)) 1L else object$degree,
     se_type     = object$se_type,
+    p_adjust    = object$p_adjust,
     n           = object$n
   )
   class(out) <- "summary.qqr"
@@ -192,7 +199,11 @@ print.summary.qqr <- function(x, digits = 4, ...) {
   cat("Observations (n)    : ", x$n, "\n")
   cat("Quantile levels (K) : ", length(x$taus), "\n")
   cat("Kernel              : ", x$kernel, "\n")
+  cat("Local polynomial    :  degree", if (is.null(x$degree)) 1L else
+    x$degree, "\n")
   cat("SE type             : ", x$se_type, "\n")
+  if (!is.null(x$p_adjust))
+    cat("P-value adjustment  : ", x$p_adjust, "\n")
   cat(strrep("-", 55L), "\n")
   if (!is.null(x$grid_type))
     cat("Grid / kernel space : ", x$grid_type, "/", x$kernel_space, "\n")

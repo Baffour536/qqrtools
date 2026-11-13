@@ -45,7 +45,7 @@ one_rep <- function(rep, design, n, h, space, se) {
   set.seed(SEED + rep)
   d   <- dgp(design, n)
   fit <- suppressWarnings(suppressMessages(
-    qqr(y ~ x, data = d, taus = grid_p, thetas = grid_p, h = h,
+    qqr(y ~ x, data = d, taus = grid_p, thetas = grid_p, h = h, degree = 1,
         kernel_space = space, se_type = se)))
   list(coef = fit$qcoef, pval = fit$pval_surfaces$x, h = fit$bandwidth)
 }

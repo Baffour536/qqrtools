@@ -7,7 +7,7 @@ bench <- function(n, se, h = "silverman", m = 19, K = 19) {
   d$y <- d$x + 0.5 * d$w + rnorm(n)
   taus <- seq(0.05, 0.95, length.out = K)
   t <- system.time(suppressWarnings(
-    qqr(y ~ x + w, d, qvar = "x", taus = taus, m = m, h = h, se_type = se)))
+    qqr(y ~ x + w, d, qvar = "x", taus = taus, m = m, h = h, se_type = se, degree = 1)))
   data.frame(n = n, m = m, K = K, h = h, se_type = se,
              seconds = round(unname(t["elapsed"]), 2))
 }

@@ -46,8 +46,7 @@ dat$y <- 1 + 2 * dat$x + 0.5 * dat$w + (0.5 + dat$x) * rnorm(n)
 ```{r fit}
 taus <- c(0.1, 0.25, 0.5, 0.75, 0.9)
 fit  <- qqr(y ~ x + w, data = dat, qvar = "x",
-            taus = taus, thetas = c(0.1, 0.25, 0.5, 0.75, 0.9),
-            h = "robust")
+            taus = taus, thetas = c(0.1, 0.25, 0.5, 0.75, 0.9))
 fit
 ```
 
@@ -85,14 +84,28 @@ data.frame(h = c(0.05, 0.1, 0.2, 0.3), rmse = round(err, 3))
 
 Because this DGP has a slope that is constant in \(\theta\), wider
 bandwidths are always better here. When the true surface varies with
-\(\theta\), a wide bandwidth smooths that variation away (bias). There is
-no universally right \(h\): report the value used (`fit$bandwidth`,
-`fit$h_details`) and check that your conclusions hold for nearby
-bandwidths.
+\(\theta\), a wide bandwidth smooths that variation away (bias).
+
+The default rule, `h = "slope"`, uses the \(n^{-1/7}\) rate that is optimal
+for local slopes, which is wider than density rules such as Silverman's,
+and the default local quadratic fit (`degree = 2`) limits the bias at the
+low and high quantiles of `x`. The rule used is stored in the fit:
 
 ```{r details}
 cat(fit$h_details)
 ```
+
+There is no universally right \(h\). `qqr_sensitivity()` refits the
+surface for several multiples of the selected bandwidth and reports how
+much it changes:
+
+```{r sensitivity}
+sens <- qqr_sensitivity(fit)
+sens
+plot(sens)
+```
+
+Interpret the features that are stable across bandwidths.
 
 ## Comparison with standard quantile regression
 
@@ -107,10 +120,22 @@ compare.qqr(fit, digits = 3)
 
 `fit$pval_surfaces` holds pointwise p-values from
 `quantreg::summary.rq()` for every cell. They are descriptive: they ignore
-the smoothing bias and the fact that many cells are examined.
+the smoothing bias and the fact that many cells are examined. The default
+`se_type = "ker"` is fast and slightly conservative; for results you
+report, `se_type = "boot"` (after `set.seed()`) is closer to the nominal
+level.
 
 ```{r pvalues}
 round(fit$pval_surfaces$x, 3)
+```
+
+With many cells, some are significant by chance. `qqr_padjust()` adjusts
+each surface for the number of cells (Benjamini-Hochberg false discovery
+rate by default):
+
+```{r padjust}
+fit_adj <- qqr_padjust(fit)
+round(fit_adj$pval_surfaces$x, 3)
 ```
 
 ## Graphics
@@ -138,14 +163,15 @@ head(qqr_surface(fit, coef = c("x", "w"), long = TRUE, digits = 3))
 
 ## Sim-Zhou weighting
 
-Sim and Zhou (2015) weight observations by the distance between their
-empirical CDF value and \(\theta\), with \(h = 0.05\) on the probability
-scale:
+Sim and Zhou (2015) use a local linear fit and weight observations by the
+distance between their empirical CDF value and \(\theta\), with a manual
+bandwidth on the probability scale (they use \(h = 0.05\); the example
+uses \(h = 0.1\)):
 
 ```{r simzhou}
 fit_sz <- suppressWarnings(
   qqr(y ~ x + w, data = dat, qvar = "x", taus = taus,
-      thetas = fit$thetas, kernel_space = "cdf", h = 0.1)
+      thetas = fit$thetas, kernel_space = "cdf", degree = 1, h = 0.1)
 )
 round(fit_sz$qcoef, 2)
 ```

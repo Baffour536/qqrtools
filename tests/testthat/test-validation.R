@@ -130,7 +130,7 @@ test_that("automatic selectors run inside qqr() and are recorded", {
     expect_type(fit$h_details, "character")
   }
   fit <- qqr(y ~ x, dat, taus = 0.5, m = 3, kernel_space = "cdf",
-             se_type = "none")
+             h = "silverman", se_type = "none")
   Fn <- stats::ecdf(dat$x)(dat$x)
   expect_equal(fit$bandwidth, 1.06 * stats::sd(Fn) * 120^(-1 / 5))
   expect_match(fit$h_details, "empirical-CDF")

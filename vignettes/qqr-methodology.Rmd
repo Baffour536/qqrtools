@@ -178,6 +178,18 @@ w_t(\theta)\,
 \]
 with \(\rho_{\tau}(\cdot)\) defined as in Section 2.1. This optimisation problem has the same structure as a weighted linear QR and can therefore be implemented using existing QR algorithms such as those in the `quantreg` package (Koenker, 2005).
 
+### Local quadratic fitting (`degree = 2`) {-}
+
+The slope \(\beta(\tau,\theta)\) is a first derivative of the conditional quantile function with respect to \(X\). For derivative estimation by local polynomials, the theory of Fan and Gijbels (1996, Chapter 3) shows that a polynomial whose degree exceeds the order of the derivative by an odd number is preferable: for the first derivative, a local *quadratic* rather than a local linear fit. The reason is the behaviour near the boundary of the support of \(X\), which is exactly where the extreme quantiles \(\theta\) of a QQR grid are located. The local linear slope has a bias of order \(h\) there, because the kernel window is cut off on one side and the fit averages the slope over an asymmetric neighbourhood; the local quadratic slope has a bias of order \(h^2\) in the interior and at the boundary. The same results hold for local polynomial quantile regression (Chaudhuri, 1991).
+
+With `degree = 2`, the default, `qqr()` therefore solves
+\[
+\min_{\alpha,\beta,\delta,\gamma}
+\sum_{t=1}^{T} w_t(\theta)\,
+\rho_{\tau}\big( Y_t - \alpha - \beta Z_t(\theta) - \delta Z_t(\theta)^2 - \gamma^{\top} W_t \big),
+\]
+and reports \(\hat\alpha\), \(\hat\beta\) and \(\hat\gamma\); the curvature coefficient \(\hat\delta\) is a nuisance parameter and is not stored. With `degree = 1` the term \(\delta Z_t(\theta)^2\) is omitted, which gives the local linear estimator of Sim and Zhou (2015). The price of the lower bias is a larger variance at a given bandwidth, which is why the local quadratic fit is combined with the wider, slope-oriented default bandwidth described in Section 3.5. The simulation evidence for this combination is summarised there.
+
 Repeating this procedure over a grid of regressor quantiles \(\theta \in \Theta\) and outcome quantiles \(\tau \in T\) yields estimates of
 
 * the local intercept surface \(\hat\alpha(\tau,\theta)\);
@@ -265,22 +277,78 @@ For inference, standard errors and p values for the coefficients at each \((z_i,
 
 These p values treat each weighted local problem as if it were a parametric linear QR model. They are **pointwise** and do not account for the smoothing bias of the local linear approximation, the data-dependent choice of \(h\), or the fact that \(m \times J\) cells are examined at once. They are best read as descriptive indicators of where the surface is clearly different from zero, not as formal tests with exact size; the simulation evidence in `audit/ECONOMETRIC_VALIDATION_REPORT.md` quantifies their behaviour in simple designs.
 
+### Choice of standard errors {-}
+
+The behaviour of the three standard-error types was examined in designs without any effect (\(Y\) independent of \(X\); normal and skewed \(X\); \(n = 250\) and \(1000\); default bandwidth and degree; 300 replications; script `tools/validation/size_default.R`). A test at the 5% level should then reject in 5% of the cells.
+
+| design | n | se_type | pooled_rejection_rate | max_cell_rate | any_cell_significant | any_cell_significant_BH |
+|---|---|---|---|---|---|---|
+| N | 250 | nid | 0.093 | 0.170 | 0.820 | 0.407 |
+| N | 250 | ker | 0.035 | 0.090 | 0.483 | 0.060 |
+| N | 250 | boot | 0.050 | 0.077 | 0.577 | 0.087 |
+| N | 1000 | nid | 0.079 | 0.153 | 0.747 | 0.280 |
+| N | 1000 | ker | 0.042 | 0.080 | 0.513 | 0.080 |
+| N | 1000 | boot | 0.050 | 0.080 | 0.567 | 0.087 |
+| S | 250 | nid | 0.076 | 0.157 | 0.740 | 0.263 |
+| S | 250 | ker | 0.042 | 0.093 | 0.517 | 0.083 |
+| S | 250 | boot | 0.050 | 0.067 | 0.500 | 0.097 |
+| S | 1000 | nid | 0.074 | 0.150 | 0.767 | 0.237 |
+| S | 1000 | ker | 0.044 | 0.100 | 0.563 | 0.097 |
+| S | 1000 | boot | 0.052 | 0.073 | 0.613 | 0.103 |
+
+Tests based on `"nid"` reject too often (7--9% on average and up to 17% in single cells), tests based on `"ker"`, the Powell kernel sandwich, are slightly conservative (3.5--4.4%), and bootstrap tests are close to the nominal level. The default is therefore `se_type = "ker"`, which is fast and deterministic; `se_type = "boot"` (after `set.seed()`) is recommended for results that are reported, at a higher computational cost. The last two columns show why the adjustment for multiplicity described next matters: without it, about half of all surfaces contain at least one "significant" cell although there is no effect anywhere.
+
+### Multiplicity (`qqr_padjust()`) {-}
+
+A surface with the default settings has \(19 \times 19 = 361\) cells per coefficient, so about 18 cells are expected to have \(p < 0.05\) when there is no effect anywhere. `qqr_padjust()` replaces each p-value surface by p-values adjusted over all cells of that surface with `stats::p.adjust()`. The default controls the false discovery rate with the procedure of Benjamini and Hochberg (1995), which remains valid under the positive dependence that is typical for neighbouring cells; `method = "BY"` (Benjamini and Yekutieli, 2001) is valid under arbitrary dependence and more conservative; `"holm"` and `"bonferroni"` control the family-wise error rate. All tables, exports and significance overlays use the adjusted values of the returned object.
+
+```{r, eval = FALSE}
+fit_adj <- qqr_padjust(fit)            # Benjamini-Hochberg
+fit_by  <- qqr_padjust(fit, "BY")      # Benjamini-Yekutieli
+```
+
+The adjustment addresses multiplicity only. Smoothing bias and bandwidth selection are still ignored, and uniform confidence bands for conditional quantile processes (Qu and Yoon, 2015) are not implemented.
+
 ## Bandwidth selection
 
 ### Why automatic selection matters {-}
 
 The bandwidth \(h\) is the single most influential tuning parameter in QQR. Too small a bandwidth yields a noisy, erratic surface because each local regression is based on very few effectively weighted observations; too large a bandwidth smooths over genuine local heterogeneity in the coefficient surface. Because a researcher can, intentionally or not, choose \(h\) post hoc to produce a surface that appears more interesting or confirms a prior hypothesis, free bandwidth selection constitutes a form of specification searching that undermines the credibility of the findings.
 
-The `qqrtools` package addresses this by making **automatic bandwidth selection the default**. Eight principled, data-driven selectors are provided via the `h` argument of `qqr()`. In every case the selected bandwidth, the formula used to compute it, and the numerical inputs are stored in the fitted object under `h_method` and `h_details` and are printed by `print.qqr()` and `summary.qqr()`, so the selection can be reported transparently in a paper's methods section.
+The `qqrtools` package addresses this by making **automatic bandwidth selection the default**. Ten data-driven selectors are provided via the `h` argument of `qqr()`. In every case the selected bandwidth, the formula used to compute it, and the numerical inputs are stored in the fitted object under `h_method` and `h_details` and are printed by `print.qqr()` and `summary.qqr()`, so the selection can be reported transparently in a paper's methods section.
+
+### Slope-oriented rule of thumb (`h = "slope"`, default) {-}
+
+$$
+h_{\text{slope}} = C\,\min\!\left(\hat\sigma_X,\;\frac{\widehat{\mathrm{IQR}}_X}{1.34}\right) n^{-1/7},
+\qquad C = 2 .
+$$
+The classical rules of thumb below are of order \(n^{-1/5}\), the optimal rate for estimating a density or the *level* of a regression function. The object of interest in QQR is a *slope*. The variance of a local polynomial estimate of a first derivative is of order \(1/(n h^{3})\) instead of \(1/(n h)\), and with a squared bias of order \(h^{4}\) the mean squared error is minimised by a bandwidth of order \(n^{-1/7}\) (Fan and Gijbels, 1996, Chapter 3). A bandwidth chosen for the level is therefore systematically too small for the slope, and the difference grows with the sample size. The rule uses the robust scale estimate of Silverman (1986) so that heavy tails do not inflate the bandwidth.
+
+The rate is given by theory, but the optimal constant depends on unknown features of the data (the third derivative of the conditional quantile function and the conditional density of the errors). The constant \(C = 2\) was therefore calibrated by simulation in three designs with uniform, normal and skewed regressors and linear, sinusoidal and saturating slopes (script `tools/validation/bandwidth_calibration.R` in the source repository). The table reports the root mean squared error of the slope, averaged over a \(5 \times 5\) grid of \((\theta,\tau)\) cells, relative to the best rule in each row.
+
+| Design, n | C = 2, quadratic (default) | C = 1.5, quadratic | C = 2.5, quadratic | C = 2, linear | Silverman, linear |
+|---|---|---|---|---|---|
+| D1 (uniform X), n = 250 | 1.29 | 1.58 | 1.15 | 1.01 | 1.86 |
+| D1 (uniform X), n = 1000 | 1.28 | 1.61 | 1.10 | 1.28 | 2.30 |
+| D2 (normal X), n = 250 | 1.12 | 1.00 | 1.27 | 1.81 | 1.21 |
+| D2 (normal X), n = 1000 | 1.28 | 1.07 | 1.54 | 2.51 | 1.25 |
+| D3 (skewed X), n = 250 | 1.17 | 1.40 | 1.07 | 1.18 | 1.67 |
+| D3 (skewed X), n = 1000 | 1.18 | 1.46 | 1.05 | 1.61 | 2.12 |
+| **Worst case** | 1.29 | 1.61 | 1.54 | 2.51 | 2.30 |
+
+Values are RMSE ratios: 1.00 is the best of all 12 rule-degree combinations in that row (constants 1.06, 1.5, 2, 2.5 and 3 with both degrees, and Silverman's rule with both degrees). The default is never more than 29% above the best combination, whereas Silverman's rule with a local linear fit is up to 130% above it. At the same bandwidth (C = 2) the local quadratic fit reduces the mean absolute bias from 0.57 to 0.07 in design D1 and from 0.58 to 0.29 in design D2 at n = 250, at the cost of a larger standard deviation. In the same study `"cv_slope"` improved on `"cv_fast"` in every design but was less accurate than `"slope"`; it is offered for users who prefer a data-driven constant.
+
+With `kernel_space = "cdf"`, the rule is applied to the ranks \(F_n(X_t)\). The rule is a transparent default, not an optimal bandwidth for every data set; Section 3.5 ends with the recommended sensitivity analysis.
 
 ### Silverman's rule of thumb (`h = "silverman"`) {-}
 
 $$
 h_{\text{Silverman}} = 1.06\,\hat\sigma_X\, n^{-1/5},
 $$
-where \(\hat\sigma_X\) is the sample standard deviation of the quantile regressor and \(n\) is the sample size (Silverman, 1986). This is the normal-reference bandwidth that minimises the asymptotic mean integrated squared error of a Gaussian-kernel density estimate when the true density is Gaussian. It is fast to compute, requires only the sample standard deviation, and is easy to reproduce and report. It is the **default** in `qqrtools`.
+where \(\hat\sigma_X\) is the sample standard deviation of the quantile regressor and \(n\) is the sample size (Silverman, 1986). This is the normal-reference bandwidth that minimises the asymptotic mean integrated squared error of a Gaussian-kernel density estimate when the true density is Gaussian. It is fast to compute, requires only the sample standard deviation, and is easy to reproduce and report. It was designed for density estimation and under-smooths QQR slopes.
 
-**Caveat for all rules of thumb.** The rules in this section are optimal (under their own assumptions) for estimating a *density* or a *conditional mean*, not for the local *slope* of a conditional quantile. The variance of a local linear slope estimate grows like \(1/(n h^3)\), so bandwidths of order \(n^{-1/5}\) can give noisy slope surfaces in moderate samples; the simulation study in `audit/ECONOMETRIC_VALIDATION_REPORT.md` illustrates this. The automatic rules make the choice transparent and reproducible, but they are not a substitute for reporting \(h\) and checking the sensitivity of the conclusions to larger and smaller bandwidths. With `kernel_space = "cdf"`, the rules are applied to the ranks \(F_n(X_t)\).
+**Caveat for the density and level rules.** The remaining rules in this section are optimal (under their own assumptions) for estimating a *density* or a *conditional mean*, not for the local *slope* of a conditional quantile. The variance of a local linear slope estimate grows like \(1/(n h^3)\), so bandwidths of order \(n^{-1/5}\) can give noisy slope surfaces in moderate samples; the simulation study in `audit/ECONOMETRIC_VALIDATION_REPORT.md` illustrates this. The automatic rules make the choice transparent and reproducible, but they are not a substitute for reporting \(h\) and checking the sensitivity of the conclusions to larger and smaller bandwidths. With `kernel_space = "cdf"`, the rules are applied to the ranks \(F_n(X_t)\).
 
 ### Robust rule of thumb (`h = "robust"`) {-}
 
@@ -309,6 +377,13 @@ h_{\text{CV}}
 $$
 where \(\mathcal{H}\) is a 15-point search grid spanning
 \([0.5\,h_{\text{Silverman}},\; 2\,h_{\text{Silverman}}]\). Check-loss cross-validation for kernel quantile regression follows Yu and Jones (1998). The criterion is computed at \(\tau = 0.5\) for a local-constant predictor, so it is a pragmatic, data-driven choice rather than an optimal bandwidth for every \(\tau\) or for the local slope; its cost grows with \(n^2\).
+
+### Cross-validation at the slope rate (`h = "cv_slope"`) {-}
+
+$$
+h_{\text{CV-slope}} = h_{\text{CV}}\; n^{1/5 - 1/7}.
+$$
+Cross-validation of the check loss targets the level of the conditional quantile, for which the optimal bandwidth is of order \(n^{-1/5}\). Multiplying by \(n^{1/5-1/7} = n^{2/35}\) moves the data-driven bandwidth to the \(n^{-1/7}\) rate of slope estimation (the factor is 1.37 for \(n = 250\) and 1.48 for \(n = 1000\)). This is a rate adjustment in the spirit of the relation between the optimal bandwidths for a function and its derivatives in Fan and Gijbels (1996); it is data-driven in the constant but, like `"cv_fast"`, costs \(O(n^2)\) operations.
 
 ### Sheather-Jones solve-the-equation plug-in (`h = "sj"`) {-}
 
@@ -391,14 +466,15 @@ framework (Li, Huang, Li and Fu, 2002; Li and Racine, 2010).
 
 A positive numeric value may still be passed directly to `h`. This is accepted -- for example to replicate a specific published result -- but triggers a **reproducibility warning** encouraging the researcher to use an automatic method. The warning message reads:
 
-> *"Bandwidth h was set manually to [value]. Manual bandwidth selection may affect results and reduce reproducibility. For automatic selection, use h = 'silverman' (default), 'robust', 'iqr', 'cv_fast', 'sj', 'yj', 'npcv', or 'sc'."*
+> *"Bandwidth h was set manually to [value]. Manual bandwidth choices affect the results; report them and check sensitivity. Automatic rules: slope, cv_slope, silverman, robust, iqr, cv_fast, sj, yj, npcv, sc."*
 
 The fitted object records `h_method = "manual"` and the `print()` and `summary()` output include a prominent reminder. The following table summarises the recommended choice of method:
 
 | Situation | Recommended method |
 |---|---|
-| Normal or near-normal quantile regressor | `"silverman"` (default) |
-| Financial returns, exchange rates, commodity prices | `"robust"` |
+| General use | `"slope"` (default) |
+| Data-driven constant at the slope rate | `"cv_slope"` |
+| Replicating density-rule results | `"silverman"` |
 | Distribution better described by quartiles | `"iqr"` |
 | No distributional assumptions, no extra packages | `"cv_fast"` |
 | Best density-based selector, base R only | `"sj"` |
@@ -406,6 +482,18 @@ The fitted object records `h_method = "manual"` and the `print()` and `summary()
 | Mixed-type data, maximum data-driven rigour | `"npcv"` |
 | Varying-coefficient structural analogue | `"sc"` |
 | Replicating a specific prior result | Numeric `h` with explicit documentation |
+
+### Bandwidth sensitivity analysis (`qqr_sensitivity()`) {-}
+
+No automatic rule removes the dependence of a nonparametric estimate on its bandwidth, and choosing \(h\) after inspecting the results invalidates naive inference. The recommended practice is to fix the rule in advance, report \(h\), and show that the conclusions are stable over a pre-specified range of bandwidths. `qqr_sensitivity()` refits the model for multiples of the selected bandwidth (by default 0.5, 0.75, 1, 1.5 and 2) with all other settings unchanged and reports, for each bandwidth, the mean and dispersion of the surface, its correlation with the baseline surface, the share of cells with the same sign, and the mean absolute difference; its `plot()` method shows the grid-averaged slope against \(\tau\) for every bandwidth.
+
+```{r, eval = FALSE}
+sens <- qqr_sensitivity(fit)
+sens
+plot(sens)
+```
+
+Features that appear only for the smallest bandwidths are likely to be noise; features that disappear only for the largest bandwidths may be genuine local structure that is being smoothed away.
 
 ## Practical considerations
 
@@ -425,10 +513,15 @@ qqr(
   qvar      = NULL,
   taus      = seq(0.05, 0.95, by = 0.05),
   m         = 19,
-  h         = "silverman",
-  kernel    = c("gaussian"),
-  se_type   = c("nid", "ker", "boot", "none"),
-  na.action = stats::na.omit
+  h            = "slope",
+  kernel       = c("gaussian"),
+  se_type      = c("ker", "nid", "boot", "none"),
+  ...,
+  na.action    = stats::na.omit,
+  grid         = c("quantile", "range"),
+  thetas       = NULL,
+  kernel_space = c("x", "cdf"),
+  degree       = 2
 )
 ```
 
@@ -452,9 +545,11 @@ G = \{z_1,\ldots,z_m\},
 \]
 constructed at the empirical quantiles of the quantile regressor (`grid = "quantile"`, default; levels `thetas`) or as an equally spaced sequence between its sample minimum and maximum (`grid = "range"`), as in Section 3.3.
 
-The argument `h` controls the bandwidth of the kernel. As detailed in Section 3.5, it accepts either a character string naming an automatic selection method or a positive numeric value. The default is `h = "silverman"`. The four automatic methods are:
+The argument `h` controls the bandwidth of the kernel. As detailed in Section 3.5, it accepts either a character string naming an automatic selection method or a positive numeric value. The default is `h = "slope"`. The automatic methods are:
 
-* `"silverman"`: \(h = 1.06\,\hat\sigma_X\, n^{-1/5}\). The default. Fast, requires only the sample standard deviation. Optimal under normality (Silverman, 1986).
+* `"slope"`: \(h = 2\,\min(\hat\sigma_X,\, \widehat{\text{IQR}}_X/1.34)\, n^{-1/7}\). The default. Uses the \(n^{-1/7}\) rate that is optimal for local slopes (Fan and Gijbels, 1996).
+* `"cv_slope"`: the `"cv_fast"` bandwidth multiplied by \(n^{1/5-1/7}\).
+* `"silverman"`: \(h = 1.06\,\hat\sigma_X\, n^{-1/5}\). Fast, requires only the sample standard deviation. Optimal under normality (Silverman, 1986).
 * `"robust"`: \(h = 0.9\,\min(\hat\sigma_X,\, \widehat{\text{IQR}}_X/1.34)\, n^{-1/5}\). Preferred for heavy-tailed or skewed regressors (Silverman, 1986; Scott, 1992).
 * `"iqr"`: \(h = \widehat{\text{IQR}}_X\, n^{-1/5}\). Appropriate when spread is best captured by the interquartile range.
 * `"cv_fast"`: fast leave-one-out cross-validation over a 15-point grid spanning \([0.5\,h_{\text{Silverman}},\, 2\,h_{\text{Silverman}}]\). Minimises the LOO quantile check-loss at \(\tau = 0.5\). No additional packages required (Yu and Jones, 1998).
@@ -1843,8 +1938,8 @@ fit <- qqr(
   qvar    = "X",
   taus    = taus,
   m       = m,
-  h       = "silverman",   # automatic -- recommended default
-  se_type = "nid"
+  h       = "slope",       # automatic -- the default
+  se_type = "ker"          # the default; use "boot" for final results
 )
 
 ## Robust bandwidth alternative (preferred for heavy-tailed data)
@@ -2485,6 +2580,12 @@ This completes a typical workflow from fitting a QQR model, through surface extr
 
 # References
 
+Benjamini, Y. and Hochberg, Y. (1995) Controlling the false discovery rate: a practical and powerful approach to multiple testing. *Journal of the Royal Statistical Society: Series B*, 57(1), 289--300.
+
+Benjamini, Y. and Yekutieli, D. (2001) The control of the false discovery rate in multiple testing under dependency. *The Annals of Statistics*, 29(4), 1165--1188.
+
+Chaudhuri, P. (1991) Nonparametric estimates of regression quantiles and their local Bahadur representation. *The Annals of Statistics*, 19(2), 760--777.
+
 Fan, J. and Gijbels, I. (1996) *Local Polynomial Modelling and Its Applications*. London: Chapman & Hall.
 
 Hayfield, T. and Racine, J.S. (2008) Nonparametric econometrics: The np package. *Journal of Statistical Software*, 27(5), 1--32.
@@ -2496,6 +2597,8 @@ Li, Q. and Racine, J.S. (2004) Cross-validated local linear nonparametric regres
 Li, Q. and Racine, J.S. (2010) Smooth varying-coefficient estimation and inference for qualitative and quantitative data. *Econometric Theory*, 26(6), 1607--1637. doi:10.1017/S0266466609990739
 
 Li, Q., Huang, C.J., Li, D. and Fu, T.-T. (2002) Semiparametric smooth coefficient models. *Journal of Business & Economic Statistics*, 20(3), 412--422. doi:10.1198/073500102288618531
+
+Qu, Z. and Yoon, J. (2015) Nonparametric estimation and inference on conditional quantile processes. *Journal of Econometrics*, 185(1), 1--19.
 
 Ruppert, D., Sheather, S.J. and Wand, M.P. (1995) An effective bandwidth selector for local least squares regression. *Journal of the American Statistical Association*, 90(432), 1257--1270.
 

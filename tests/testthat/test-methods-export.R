@@ -9,7 +9,7 @@
 test_that("print and summary report the estimation settings", {
   fit <- .fit_mx()
   expect_output(print(fit), "empirical quantiles")
-  expect_output(print(fit), "Silverman")
+  expect_output(print(fit), "Slope-oriented")
   s <- summary(fit)
   expect_s3_class(s, "summary.qqr")
   expect_equal(s$col_means, colMeans(fit$qcoef))
