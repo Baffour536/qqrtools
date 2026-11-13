@@ -2,13 +2,19 @@ citHeader("To cite qqrtools in publications, use:")
 
 bibentry(
   bibtype = "Manual",
-  title = "qqrtools: Tools for Quantile-on-Quantile Regression",
-  author = c(
+  title   = "qqrtools: Tools for Quantile-on-Quantile Regression",
+  author  = c(
     person("Collins Baffour", "Kyei"),
     person("William Godfred", "Cantah"),
     person("Peterson", "Owusu Junior"),
     person("Dominic", "Owusu Abeyie")
   ),
-  year = "2026",
-  note = "R package version 0.1.0"
+  year    = "2026",
+  note    = "R package version 0.3.0",
+  url     = "https://github.com/Baffour536/qqrtools"
 )
+
+citFooter("Please also cite the QQR method: Sim, N. and Zhou, H. (2015).",
+          "Oil prices, US stock return, and the dependence between their",
+          "quantiles. Journal of Banking & Finance, 55, 1-8.",
+          "doi:10.1016/j.jbankfin.2015.01.013")

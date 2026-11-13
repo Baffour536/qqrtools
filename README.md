@@ -1,90 +1,74 @@
 # qqrtools: Tools for Quantile-on-Quantile Regression
 
 <!-- badges: start -->
+[![R-CMD-check](https://github.com/Baffour536/qqrtools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/Baffour536/qqrtools/actions/workflows/R-CMD-check.yaml)
 <!-- badges: end -->
 
-## Overview
+`qqrtools` estimates **quantile-on-quantile regression (QQR)** surfaces in
+the sense of Sim and Zhou (2015). Standard quantile regression (QR) tells you
+how a regressor *X* shifts the τ-quantile of an outcome *Y*. QQR asks a finer
+question: how does the **θ-quantile of X** affect the **τ-quantile of Y**?
+The answer is a two-dimensional surface β(θ, τ) that can reveal
+asymmetric, tail-specific or state-dependent relationships which a single
+QR slope averages away.
 
-`qqr` implements **quantile-on-quantile regression (QQR)** as introduced
-by Sim and Zhou (2015). Where standard quantile regression (QR) models the
-conditional quantiles of a response as a function of predictors, QQR goes a
-step further: it models how the effect of a regressor on the outcome varies
-jointly across the *distribution of the outcome* **and** the *distribution
-of the regressor*. The result is a two-dimensional coefficient surface
-indexed by both quantile dimensions.
+> **Formerly `qqr`.** The package was renamed from `qqr` to `qqrtools` in
+> version 0.3.0. Replace `library(qqr)` with `library(qqrtools)`; function
+> names are unchanged. Version 0.3.0 also corrects the estimation grid and
+> `compare.qqr()` – see [What changed in 0.3.0](#what-changed-in-030).
 
-This richer structure is particularly useful in applications where the
-relationship between two variables is asymmetric, non-linear, or
-concentrated in specific regions of the joint distribution — for example,
-tail dependence in financial markets, regime-dependent transmission in
-macroeconomics, or heterogeneous treatment effects in policy evaluation.
+## What the package estimates
 
-Recent applied uses of QQR include studies of oil price spillovers
-(Sim and Zhou, 2015), COVID-19 and climate interactions
-(Shahzad et al., 2020), and carbon-green bond market linkages (Wu, 2023).
+For each grid point x<sup>θ</sup> (by default the empirical θ-quantile of
+*X*) and each τ, `qqr()` solves the kernel-weighted local linear quantile
+regression
 
----
+min over (α, β, γ) of Σ<sub>t</sub> ρ<sub>τ</sub>( Y<sub>t</sub> − α − β (X<sub>t</sub> − x<sup>θ</sup>) − γ′W<sub>t</sub> ) · K(d<sub>t</sub> / h),
 
-## Key features
+where ρ<sub>τ</sub> is the check function, *K* is the Gaussian kernel and
+*W* are optional controls. The local slope β̂(θ, τ) is the QQR estimate.
+The kernel distance is either d<sub>t</sub> = X<sub>t</sub> − x<sup>θ</sup>
+(`kernel_space = "x"`, default; bandwidth in units of *X*) or
+d<sub>t</sub> = F<sub>n</sub>(X<sub>t</sub>) − θ
+(`kernel_space = "cdf"`, the exact Sim–Zhou weighting; bandwidth on the
+probability scale, Sim and Zhou use h = 0.05). Each local problem is solved
+by `quantreg::rq()`.
 
-- **Full QQR coefficient surfaces** — fits local linear quantile regressions
-  over a grid of regressor values and a vector of outcome quantile levels,
-  storing coefficient and p-value surfaces for every coefficient in the model.
+## Features
 
-- **Automatic bandwidth selection** — eight principled, data-driven methods
-  remove researcher discretion over the most critical tuning parameter and
-  promote reproducibility:
-
-## Choosing a bandwidth method
-
-| Situation | Recommended method | Rationale |
-|-----------|-------------------|-----------|
-| Normal or near-normal regressor | `"silverman"` | AMISE-optimal under normality; fast |
-| Financial returns, exchange rates, commodity prices | `"robust"` | IQR correction guards against heavy tails |
-| Distribution better described by quartiles | `"iqr"` | Scale matched to interquartile spread |
-| Fast, assumption-free selection (no extra packages) | `"cv_fast"` | LOO quantile loss; no distributional assumption |
-| Best density-based selector, base R only | `"sj"` | Sheather-Jones; best available density selector |
-| Regression data, best structural match to QQR | `"yj"` | Uses both X and Y; regression MISE-optimal |
-| Maximum data-driven rigour, mixed-type data | `"npcv"` | np full LS cross-validation |
-| Varying-coefficient structural analogue | `"sc"` | np smooth-coefficient CV; mirrors QQR structure |
-| Replicating a specific prior result | Numeric `h` with documentation | Manual, triggers warning |
-
-The `"yj"` selector (Ruppert-Sheather-Wand) is particularly noteworthy
-because it is the only method that uses both the quantile regressor `x`
-and the outcome `y` together to minimise regression MISE -- making it the
-most theoretically appropriate selector for QQR, which is fundamentally a
-regression problem.
-
-
-  Manual numeric `h` is accepted but triggers a reproducibility warning.
-
-- **Publication-quality 3D plots** — two complementary surface visualisations
-  using only base R graphics (no extra dependencies):
-  - `surface3d()` — a smooth coloured 3D surface, equivalent to MATLAB's
-    `surf()`, with colour legend and optional zero-reference plane.
-  - `panel_surface()` — a ribbon panel plot with one coloured flat panel per
-    coefficient, matching the style used in several published QQR studies.
-  - `plot.qqr()` and `Int.plot()` — static and interactive (via `rgl`) plots.
-
-- **Word export with significance stars** — `word.qqr(which = "coef_stars")`
-  produces a single combined table with coefficients and stars appended
-  directly (`***`, `**`, `*`), plus an automatic footnote. Unavailable
-  p-values are marked `[NA]` rather than left blank.
-
-- **QR vs. QQR comparison** — `compare.qqr()`, `plot.compare.qqr()`,
-  `excel.compare.qqr()`, and `word.compare.qqr()` collapse the QQR surface
-  to a univariate function of `tau` and compare it with standard QR
-  coefficients — a robustness check recommended in the applied literature.
-
-- **Tidy surface extraction and export** — `qqr_surface()`, `rowave.qqr()`,
-  `excel.qqr()`, and `word.qqr()` for downstream reporting and analysis.
-
----
+- **Estimation** – `qqr()` returns coefficient and p-value surfaces for the
+  intercept, the quantile regressor and every control (numeric or factor),
+  with the grid, its θ levels, Kish effective local sample sizes and a
+  record of failed local fits.
+- **Bandwidth rules** – `"silverman"` (default), `"robust"`, `"iqr"`,
+  `"cv_fast"` (leave-one-out check-loss cross-validation), `"sj"`
+  (Sheather–Jones), `"yj"` (Ruppert–Sheather–Wand, needs *KernSmooth*),
+  `"npcv"` and `"sc"` (need *np*), or a number. The chosen rule and a
+  sentence for your methods section are stored in the fit.
+- **Comparison with QR** – `compare.qqr()` averages the surface over θ for
+  each τ and compares it with `quantreg::rq()` (Sim and Zhou's robustness
+  check); `plot.compare.qqr()`, `excel.compare.qqr()`, `word.compare.qqr()`.
+- **Graphics** – `surface3d()`, `panel_surface()`, `plot()` (base
+  graphics), `Int.plot()` (*rgl*), and `qqr_heatmap()`, `qqr_contour()`,
+  `qqr_plotly()` (*plotly*) with optional significance overlays.
+- **Data diagnostics** – `qqr_cor_heatmap()` summarises the bivariate
+  quantile dependence of *X* and *Y* (Spearman, Kendall, Somers' D, Pearson,
+  Blomqvist's β, co-exceedance with an independence benchmark).
+- **Tables and export** – `qqr_surface()` (wide or long), `rowave.qqr()`,
+  `excel.qqr()`, `word.qqr()` (optionally with significance stars).
 
 ## Installation
 
+`qqrtools` is not on CRAN. Install it from GitHub:
 
----
+```r
+# install.packages("remotes")
+remotes::install_github("Baffour536/qqrtools")
+```
+
+R ≥ 4.1 is required. Only *quantreg* is a hard dependency; plotting and
+export functions use *plot3D*, *rgl*, *plotly*, *ggplot2*, *openxlsx*,
+*officer* and *flextable* if they are installed.
 
 ## Quick start
 
@@ -92,165 +76,148 @@ regression problem.
 library(qqrtools)
 
 set.seed(42)
-n   <- 300
+n   <- 400
 x   <- rnorm(n)
 w   <- rnorm(n)
-y   <- 0.5 + x * qnorm(runif(n)) + 0.3 * w
+## the effect of x is larger in the upper tail of y when x is high
+y   <- 0.5 + x + 0.3 * w + (1 + 0.5 * pmax(x, 0)) * rnorm(n)
 dat <- data.frame(y = y, x = x, w = w)
 
-## --- 1. Fit with automatic bandwidth (Silverman -- default) ---
 fit <- qqr(y ~ x + w, data = dat, qvar = "x",
-           taus    = seq(0.05, 0.95, by = 0.05),
-           m       = 19,
-           h       = "silverman",   # default; also try "robust", "sj", "yj"
-           se_type = "nid")
-
-## --- 1b. Other automatic selectors (same interface) ---
-# fit_sj <- qqr(y ~ x + w, data = dat, qvar = "x", h = "sj")
-# fit_yj <- qqr(y ~ x + w, data = dat, qvar = "x", h = "yj")  # needs KernSmooth
-# fit_cv <- qqr(y ~ x + w, data = dat, qvar = "x", h = "cv_fast")
-
-print(fit)
+           taus = seq(0.1, 0.9, by = 0.1),   # quantiles of y
+           m    = 9)                         # grid at the 0.05..0.95 quantiles of x
+fit
 summary(fit)
 
-## --- 2. 3D surface plot ---
-surface3d(fit, coef = "x", palette = "viridis")
+## QQR slope surface: rows = theta (quantiles of x), columns = tau
+round(fit$qcoef, 2)
 
-## --- 3. Panel ribbon plot ---
-panel_surface(fit)
+## Robustness check against standard quantile regression
+compare.qqr(fit, digits = 3)
 
-## --- 4. Export to Word with significance stars ---
-word.qqr(fit, coef = "x", which = "coef_stars", digits = 3,
-         file = "QQR_results_stars.docx")
+## Graphics
+surface3d(fit, palette = "RdBu", add_zero_plane = TRUE)
+panel_surface(fit, coef = c("x", "w"))
+if (requireNamespace("plotly", quietly = TRUE)) {
+  qqr_heatmap(fit, sig_overlay = "stars")
+}
 
-## --- 5. Compare with standard QR ---
-cmp <- compare.qqr(fit, coef = "x")
-plot.compare.qqr(fit, coef = "x")
-
-## --- 6. Export all surfaces to Excel ---
-excel.qqr(fit, which = "both", digits = 4,
-          file = "QQR_surfaces.xlsx")
+## Tables and export
+head(qqr_surface(fit, coef = "x", digits = 3))
+if (requireNamespace("openxlsx", quietly = TRUE)) {
+  excel.qqr(fit, file = file.path(tempdir(), "qqr_surfaces.xlsx"), digits = 4)
+}
 ```
 
----
-
-## Bandwidth selection — why it matters
-
-The bandwidth `h` is the single most influential tuning parameter in QQR. A
-bandwidth that is too small produces a noisy, erratic surface; one that is
-too large smooths over genuine local heterogeneity. Because researchers can,
-intentionally or not, choose `h` to obtain more favourable results, free
-bandwidth selection is a form of specification searching that undermines the
-credibility of QQR findings.
-
-`qqrtools` makes automatic selection the default and stores the method and full
-formula in the fitted object so it can be reported transparently:
+### The Sim–Zhou weighting
 
 ```r
-fit <- qqr(y ~ x, data = dat, qvar = "x", h = "robust")
-
-## The summary prints the selection details for the methods section:
-summary(fit)
-#> Selection method    :  Robust rule of thumb
-#> Details             :  h = 0.9 * min(sd(x), IQR(x)/1.34) * n^(-1/5)
-#>                        sd(x) = 0.9874,  IQR(x) = 1.3021,  n = 300,  h = 0.2814
+fit_sz <- qqr(y ~ x + w, data = dat, qvar = "x",
+              taus = seq(0.1, 0.9, by = 0.1), m = 9,
+              kernel_space = "cdf", h = 0.05)   # warns: manual bandwidth
 ```
 
-Manual `h` is still allowed for reproducibility of existing work, but
-triggers a warning:
+## Interpreting the output
+
+- `fit$qcoef[i, j]` is β̂(θ<sub>i</sub>, τ<sub>j</sub>): the local effect of
+  *X* on the τ<sub>j</sub>-quantile of *Y* when *X* is near its
+  θ<sub>i</sub>-quantile (`fit$thetas`, `fit$grid`).
+- The intercept surface is the fitted τ-quantile of *Y* at
+  *X* = x<sup>θ</sup> and *W* = 0; control surfaces are local effects of
+  the controls.
+- P-values are **pointwise** results from `quantreg::summary.rq()` for each
+  weighted local problem. They ignore bandwidth selection, smoothing bias and
+  the many cells tested, so treat them as descriptive.
+- Results depend on the bandwidth. Automatic rules make the choice
+  reproducible, but they come from density or mean-regression theory and
+  are not optimal for QQR slopes. Rules of the form h ∝ n<sup>−1/5</sup>,
+  such as Silverman's, can give noisy slope surfaces. Report *h* and check
+  how sensitive the results are to it (see the methodology vignette).
+
+## What changed in 0.3.0
+
+| Area | 0.2.0 (`qqr`) | 0.3.0 (`qqrtools`) |
+|------|---------------|--------------------|
+| Package name | `qqr` | `qqrtools` |
+| Grid | equally spaced over the range of *X*, but labelled as quantiles 0.05–0.95 in plots | empirical θ-quantiles of *X* (`grid = "quantile"`); old grid via `grid = "range"` |
+| `compare.qqr()` | averaged over τ and paired grid point *j* with τ<sub>j</sub> | averages over θ for each τ (Sim–Zhou comparison) |
+| `cv_fast` | cross-validated a median of *x* itself (ignored *y*) | leave-one-out check-loss CV of *y* given *x* |
+| Factor controls, transformed regressors (`log(x)`) | silently produced `NA` surfaces | estimated correctly |
+| Plotly colour scales | reversed (negative values shown red) | negative = blue, positive = red |
+| Somers' D | used ties on *X* in the denominator | correct D(Y\|X) |
+| Kernel space | *X* only | *X* or empirical CDF (`kernel_space = "cdf"`) |
+| `dplyr`, `tidyr` | imported | no longer needed |
+
+Results produced with `qqr` 0.2.0 should be re-estimated. See
+[NEWS.md](NEWS.md) for the full list.
+
+## Documentation
+
+- `vignette("qqrtools")` – getting started (runs on your machine).
+- `vignette("qqr-methodology")` – methodology, bandwidths, inference,
+  visualisation and dependence diagnostics.
+- Help pages: `?qqr`, `?compare.qqr`, `?surface3d`, `?qqr_heatmap`, …
+
+## Development and testing
+
+The test suite (`tests/testthat`) checks every cell of the surface against
+direct weighted `quantreg::rq()` fits, the large-bandwidth limit against
+standard QR, exact recovery of noiseless models, bandwidth formulas, the
+dependence measures against brute-force definitions, input validation and
+all exported functions. Run it with `devtools::test()`. GitHub Actions runs
+`R CMD check` on Windows, macOS and Linux. Validation reports live in
+[`audit/`](audit/).
+
+## Citation
 
 ```r
-fit2 <- qqr(y ~ x, data = dat, qvar = "x", h = 0.05)
-#> Warning: Bandwidth h was set manually to 0.05. Manual bandwidth selection
-#> may affect results and reduce reproducibility. For automatic selection,
-#> use h = 'silverman' (default), 'robust', 'iqr', 'cv_fast', 'sj', 'yj', 'npcv', or 'sc'.
+citation("qqrtools")
 ```
 
-
----
-
-## Main functions
-
-| Function | Description |
-|----------|-------------|
-| `qqr()` | Fit a QQR model |
-| `print.qqr()` | Compact model summary |
-| `summary.qqr()` | Detailed surface statistics and bandwidth diagnostics |
-| `surface3d()` | Smooth 3D coefficient surface (base R) |
-| `panel_surface()` | Ribbon panel 3D plot (base R) |
-| `plot.qqr()` | Static 3D plot via `plot3D` or base R |
-| `Int.plot()` | Interactive 3D plot via `rgl` |
-| `qqr_surface()` | Extract surfaces as wide or long data frames |
-| `rowave.qqr()` | Row-wise averages across outcome quantiles |
-| `compare.qqr()` | Compare row-mean QQR with standard QR |
-| `plot.compare.qqr()` | `ggplot2` comparison plot |
-| `excel.qqr()` | Export surfaces to Excel |
-| `word.qqr()` | Export surfaces to Word (with optional stars) |
-| `excel.compare.qqr()` | Export QR vs. QQR comparison to Excel |
-| `word.compare.qqr()` | Export QR vs. QQR comparison to Word |
-
----
+Please also cite Sim and Zhou (2015) for the QQR method.
 
 ## References
 
-Fan, J. and Gijbels, I. (1996) *Local Polynomial Modelling and Its
-Applications*. London: Chapman & Hall.
-
-Koenker, R. (2005) *Quantile Regression*. Cambridge: Cambridge University
-Press. doi:10.1017/CBO9780511754098
+Koenker, R. (2005) *Quantile Regression*. Cambridge University Press.
+doi:10.1017/CBO9780511754098
 
 Koenker, R. and Bassett, G. (1978) Regression quantiles. *Econometrica*,
-46(1), 33--50. doi:10.2307/1913643
+46(1), 33–50. doi:10.2307/1913643
 
-Shahzad, F., Shahzad, U., Fareed, Z., Iqbal, N., Hashmi, S.H. and Ahmad, F.
-(2020) Asymmetric nexus between temperature and COVID-19 in the top ten
-affected provinces of China: A current application of quantile-on-quantile
-approach. *Science of the Total Environment*, 736, 139115.
-doi:10.1016/j.scitotenv.2020.139115
-
-Silverman, B.W. (1986) *Density Estimation for Statistics and Data Analysis*.
-London: Chapman & Hall.
-
-Sim, N. and Zhou, H. (2015) Oil prices, US stock return and the dependence
-between their quantiles. *Journal of Banking & Finance*, 55, 1--8.
-doi:10.1016/j.jbankfin.2015.02.030
-
-Wu, D. (2023) The linkage between carbon market and green bond market:
-Evidence from a quantile-on-quantile regression approach. *Sustainability*,
-15(13), 10634. doi:10.3390/su151310634
-
-Hayfield, T. and Racine, J.S. (2008) Nonparametric econometrics: The np
-package. *Journal of Statistical Software*, 27(5), 1--32.
-
-Jones, M.C., Marron, J.S. and Sheather, S.J. (1996) A brief survey of
-bandwidth selection for density estimation. *Journal of the American
-Statistical Association*, 91(433), 401--407.
-
-Li, Q. and Racine, J.S. (2010) Smooth varying-coefficient estimation and
-inference for qualitative and quantitative data. *Econometric Theory*,
-26(6), 1--31.
-
-Ruppert, D., Sheather, S.J. and Wand, M.P. (1995) An effective bandwidth
+Ruppert, D., Sheather, S. J. and Wand, M. P. (1995) An effective bandwidth
 selector for local least squares regression. *Journal of the American
-Statistical Association*, 90(432), 1257--1270.
+Statistical Association*, 90(432), 1257–1270.
+doi:10.1080/01621459.1995.10476630
 
-Scott, D.W. (1992) *Multivariate Density Estimation: Theory, Practice, and
-Visualization*. New York: Wiley.
+Shahzad, F., Shahzad, U., Fareed, Z., Iqbal, N., Hashmi, S. H. and
+Ahmad, F. (2020) Asymmetric nexus between temperature and COVID-19 in the top
+ten affected provinces of China: A current application of
+quantile-on-quantile approach. *Science of the Total Environment*, 736,
+139115. doi:10.1016/j.scitotenv.2020.139115
 
-Sheather, S.J. and Jones, M.C. (1991) A reliable data-based bandwidth
+Sheather, S. J. and Jones, M. C. (1991) A reliable data-based bandwidth
 selection method for kernel density estimation. *Journal of the Royal
-Statistical Society Series B*, 53(3), 683--690.
+Statistical Society Series B*, 53(3), 683–690.
+doi:10.1111/j.2517-6161.1991.tb01857.x
 
-Yu, K. and Jones, M.C. (1998) Local linear quantile regression.
-*Journal of the American Statistical Association*, 93(441), 228--237.
-doi:10.1080/01621459.1998.10473680
+Silverman, B. W. (1986) *Density Estimation for Statistics and Data
+Analysis*. London: Chapman & Hall.
 
----
+Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the dependence
+between their quantiles. *Journal of Banking & Finance*, 55, 1–8.
+doi:10.1016/j.jbankfin.2015.01.013
+
+Yu, K. and Jones, M. C. (1998) Local linear quantile regression. *Journal
+of the American Statistical Association*, 93(441), 228–237.
+doi:10.1080/01621459.1998.10474104
 
 ## Authors
 
-Collins Baffour Kyei, William Godfred Cantah, Peterson Owusu Junior  
-Department of Economic Studies and Department of Data Science and Economic
-Policy, University of Cape Coast, Ghana.
+Collins Baffour Kyei (maintainer), William Godfred Cantah and Peterson
+Owusu Junior (Department of Economic Studies and Department of Data Science
+and Economic Policy, University of Cape Coast, Ghana), and Dominic Owusu
+Abeyie. ORCID iDs are listed in `DESCRIPTION`.
 
-Corresponding author: [collinskb536@gmail.com](mailto:collinskb536@gmail.com)
+## Licence
+
+MIT © 2025–2026 Collins Baffour Kyei et al. See [LICENSE.md](LICENSE.md).

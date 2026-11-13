@@ -1,0 +1,157 @@
+---
+title: "Getting started with qqrtools"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with qqrtools}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>",
+                      fig.width = 6.5, fig.height = 4.5)
+```
+
+`qqrtools` estimates quantile-on-quantile regression (QQR) surfaces
+\(\beta(\theta, \tau)\): the effect of the \(\theta\)-quantile of a regressor
+\(X\) on the \(\tau\)-quantile of an outcome \(Y\) (Sim and Zhou, 2015).
+This vignette runs a complete analysis on simulated data in which the true
+surface is known. The methodology is explained in
+`vignette("qqr-methodology")`.
+
+## Simulated data with a known surface
+
+Let \(X \sim U(0, 1)\), a control \(W \sim N(0, 1)\) and
+
+\[
+Y = 1 + 2X + 0.5W + (0.5 + X)\,\varepsilon, \qquad \varepsilon \sim N(0,1).
+\]
+
+The conditional \(\tau\)-quantile is
+\(Q_Y(\tau \mid x, w) = 1 + 0.5\,\Phi^{-1}(\tau) + \{2 + \Phi^{-1}(\tau)\}x + 0.5w\),
+so the true QQR slope is \(\beta(\theta, \tau) = 2 + \Phi^{-1}(\tau)\) for
+every \(\theta\): the effect of \(X\) is larger in the upper tail of \(Y\),
+and it does not depend on the quantile of \(X\).
+
+```{r data}
+library(qqrtools)
+set.seed(2026)
+n   <- 1000
+dat <- data.frame(x = runif(n), w = rnorm(n))
+dat$y <- 1 + 2 * dat$x + 0.5 * dat$w + (0.5 + dat$x) * rnorm(n)
+```
+
+## Fitting the model
+
+```{r fit}
+taus <- c(0.1, 0.25, 0.5, 0.75, 0.9)
+fit  <- qqr(y ~ x + w, data = dat, qvar = "x",
+            taus = taus, thetas = c(0.1, 0.25, 0.5, 0.75, 0.9),
+            h = "robust")
+fit
+```
+
+The grid points are the empirical \(\theta\)-quantiles of `x`:
+
+```{r grid}
+rbind(theta = fit$thetas, x = round(fit$grid, 3))
+```
+
+## The estimated surface
+
+Rows are \(\theta\) (quantiles of `x`), columns are \(\tau\) (quantiles of
+`y`):
+
+```{r surface}
+round(fit$qcoef, 2)
+## true surface: the same value in every row
+round(2 + qnorm(taus), 2)
+```
+
+The estimates reproduce the pattern of the true surface: slopes increase
+with \(\tau\) and are similar across \(\theta\). Individual cells are
+noisy, because each local regression uses only the observations near one
+grid point. The noise depends strongly on the bandwidth:
+
+```{r bandwidth}
+err <- sapply(c(0.05, 0.1, 0.2, 0.3), function(h) {
+  f <- suppressWarnings(
+    qqr(y ~ x + w, data = dat, qvar = "x", taus = taus,
+        thetas = fit$thetas, h = h, se_type = "none"))
+  sqrt(mean(sweep(f$qcoef, 2, 2 + qnorm(taus))^2))
+})
+data.frame(h = c(0.05, 0.1, 0.2, 0.3), rmse = round(err, 3))
+```
+
+Because this DGP has a slope that is constant in \(\theta\), wider
+bandwidths are always better here. When the true surface varies with
+\(\theta\), a wide bandwidth smooths that variation away (bias). There is
+no universally right \(h\): report the value used (`fit$bandwidth`,
+`fit$h_details`) and check that your conclusions hold for nearby
+bandwidths.
+
+```{r details}
+cat(fit$h_details)
+```
+
+## Comparison with standard quantile regression
+
+Averaging the surface over \(\theta\) should give roughly the standard QR
+slope when the QR model is correctly specified (here it is):
+
+```{r compare}
+compare.qqr(fit, digits = 3)
+```
+
+## P-values
+
+`fit$pval_surfaces` holds pointwise p-values from
+`quantreg::summary.rq()` for every cell. They are descriptive: they ignore
+the smoothing bias and the fact that many cells are examined.
+
+```{r pvalues}
+round(fit$pval_surfaces$x, 3)
+```
+
+## Graphics
+
+```{r plot3d}
+surface3d(fit, palette = "Blue-Red 3", add_zero_plane = FALSE, theta = 35)
+```
+
+```{r panels, fig.height = 3.5}
+panel_surface(fit, coef = c("x", "w"))
+```
+
+Interactive versions are available with `qqr_heatmap()`, `qqr_contour()`
+and `qqr_plotly()` (package *plotly*) and `Int.plot()` (package *rgl*).
+
+## Tables and export
+
+```{r tables}
+head(qqr_surface(fit, coef = "x", digits = 3))
+head(qqr_surface(fit, coef = c("x", "w"), long = TRUE, digits = 3))
+```
+
+`excel.qqr()`, `word.qqr()`, `excel.compare.qqr()` and
+`word.compare.qqr()` write the same tables to *Excel* and *Word* files.
+
+## Sim-Zhou weighting
+
+Sim and Zhou (2015) weight observations by the distance between their
+empirical CDF value and \(\theta\), with \(h = 0.05\) on the probability
+scale:
+
+```{r simzhou}
+fit_sz <- suppressWarnings(
+  qqr(y ~ x + w, data = dat, qvar = "x", taus = taus,
+      thetas = fit$thetas, kernel_space = "cdf", h = 0.1)
+)
+round(fit_sz$qcoef, 2)
+```
+
+## References
+
+Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the dependence
+between their quantiles. *Journal of Banking & Finance*, 55, 1--8.
+doi:10.1016/j.jbankfin.2015.01.013

@@ -1,6 +1,6 @@
 Package: qqrtools
 Title: Tools for Quantile-on-Quantile Regression
-Version: 0.1.0
+Version: 0.3.0
 Authors@R: c(
     person(
       "Collins Baffour", "Kyei",
@@ -19,74 +19,42 @@ Authors@R: c(
       comment = c(ORCID = "0000-0001-6253-5770")
     ),
     person(
-        "Dominic", "Owusu Abeyie",
-        role = "aut",
-        comment = c(ORCID = "0009-0007-9335-4543")
+      "Dominic", "Owusu Abeyie",
+      role    = "aut",
+      comment = c(ORCID = "0009-0007-9335-4543")
     )
   )
-Description: Implements quantile-on-quantile regression (QQR) as introduced
-    by Sim and Zhou (2015) <doi:10.1016/j.jbankfin.2015.02.030> for
-    exploring how the effect of a covariate varies jointly across the
-    conditional quantiles of a response and the quantiles of a designated
-    regressor. The main fitting function 'qqr()' uses local linear quantile
-    regression with Gaussian kernel weights to estimate coefficient and
-    p-value surfaces over user-specified grids of outcome and regressor
-    quantiles. Eight automatic bandwidth selection methods are provided to
-    promote reproducibility and remove researcher discretion over this
-    critical tuning parameter: Silverman's (1986) rule of thumb, a robust
-    IQR-corrected rule (Scott 1992), an IQR-scaled rule, a fast
-    leave-one-out cross-validation selector (Yu and Jones 1998, 'cv_fast'),
-    the Sheather-Jones solve-the-equation plug-in
-    (Sheather and Jones 1991, 'sj'), the Ruppert-Sheather-Wand direct
-    plug-in for local linear regression (Ruppert, Sheather and Wand 1995,
-    'yj'), np full least-squares cross-validation via 'npregbw()'
-    (Hayfield and Racine 2008, 'npcv'), and np smooth-coefficient
-    cross-validation via 'npscoefbw()' (Li and Racine 2010, 'sc').
-    The selected bandwidth, formula, numerical inputs and bibliographic
-    reference are stored in the fitted object and printed automatically.
-    A comprehensive visualisation suite covers every major display type
-    for QQR surfaces: static and interactive three-dimensional perspective
-    plots ('surface3d()', 'panel_surface()', 'plot.qqr()', 'Int.plot()');
-    publication-ready two-dimensional heatmaps with optional significance
-    star overlays and symmetric zero-centred colour scaling
-    ('qqr_heatmap()'); filled contour plots with automatic zero-contour
-    highlighting and significance masking ('qqr_contour()'); a unified
-    interactive plotly hub supporting 3D surface, heatmap and contour
-    display types in a single function ('qqr_plotly()'); and a quantile
-    dependence heatmap ('qqr_cor_heatmap()') that characterises the
-    bivariate dependence structure between the response and the quantile
-    regressor across a joint quantile grid using six dependence measures:
-    Spearman rank correlation (Spearman 1904), Kendall's tau-b
-    (Kendall 1938), Somers' asymmetric D statistic (Somers 1962),
-    Pearson linear correlation, Blomqvist's medial beta
-    (Blomqvist 1950), and co-exceedance probability, a tail-dependence
-    measure widely used in financial contagion research. The dependence
-    heatmap supports both a subsample mode, which computes measures on
-    the actual data values within each joint quantile cell, and a binary
-    indicator mode that replicates the approach of Roudane (2026).
-    Additional methods support extracting surfaces as tidy tables
-    ('qqr_surface()', 'rowave.qqr()'), exporting results with significance
-    stars to Excel and Word ('excel.qqr()', 'word.qqr()'), and comparing
-    row-averaged QQR effects with standard quantile regression coefficients
-    ('compare.qqr()', 'plot.compare.qqr()', 'excel.compare.qqr()',
-    'word.compare.qqr()'). Core quantile regression algorithms use
-    'quantreg' (Koenker 2005 <doi:10.1017/CBO9780511754098>). Static
-    heatmap and contour functions require 'ggplot2'; the interactive
-    'qqr_plotly()' requires 'plotly'. The 'sj' and 'yj' bandwidth
-    selectors require only base R or the recommended 'KernSmooth' package;
-    the 'npcv' and 'sc' selectors require the 'np' package.
+Description: Estimates quantile-on-quantile regression (QQR) models in the
+    sense of Sim and Zhou (2015) <doi:10.1016/j.jbankfin.2015.01.013>,
+    which describe how the effect of a designated regressor on the
+    conditional quantiles of a response varies across the quantiles of that
+    regressor. The fitting function 'qqr()' runs Gaussian-kernel weighted
+    local linear quantile regressions (Yu and Jones 1998
+    <doi:10.1080/01621459.1998.10474104>) at a grid of empirical quantiles
+    of the regressor, with optional control variables, kernel weights on
+    either the regressor scale or the empirical distribution function scale
+    of Sim and Zhou, and pointwise p-values from 'quantreg'. Automatic
+    bandwidth rules (Silverman, robust and IQR rules of thumb, check-loss
+    cross-validation, Sheather-Jones and Ruppert-Sheather-Wand plug-ins, and
+    'np' cross-validation) are stored with a reporting description. Further
+    tools compare the regressor-averaged QQR surface with standard quantile
+    regression, extract and export surfaces to tables, 'Excel' and 'Word',
+    draw static and interactive three-dimensional surfaces, heatmaps and
+    contour plots, and summarise the bivariate quantile dependence of the
+    data with rank correlation, Somers' D, Blomqvist's beta and
+    co-exceedance measures.
 License: MIT + file LICENSE
+URL: https://github.com/Baffour536/qqrtools
+BugReports: https://github.com/Baffour536/qqrtools/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Depends:
     R (>= 4.1.0)
 Imports:
-    dplyr,
     graphics,
     grDevices,
     quantreg,
-    stats,
-    tidyr
+    stats
 Suggests:
     flextable,
     ggplot2,
@@ -96,12 +64,10 @@ Suggests:
     officer,
     openxlsx,
     plot3D,
+    plotly,
     rgl,
     rmarkdown,
-    testthat (>= 3.0.0),
-    plotly
+    testthat (>= 3.0.0)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-URL: https://github.com/CollinsBaffourKyei/qqr
-BugReports: https://github.com/CollinsBaffourKyei/qqr/issues
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.1
