@@ -119,12 +119,11 @@ in a single figure, sharing a common colour scale and z-axis so that all
 panels are directly visually comparable.
 }
 \details{
-For each requested coefficient, the function extracts the row mean of
-the corresponding surface (averaging over all conditional quantile
-levels \code{taus}) and plots it as a flat coloured ribbon spanning
-the quantile grid. The ribbons are arranged side-by-side, with the
-variable names on the x-axis, quantile levels on the y-axis, and
-coefficient values on the z-axis.
+For each requested coefficient the full \eqn{m \times K} surface is
+drawn with \code{\link[graphics]{persp}} in its own panel (x-axis: grid
+quantiles \eqn{\theta} of the quantile regressor; y-axis: \eqn{\tau};
+z-axis: coefficient or p-value). The panels are placed side by side and
+share one colour scale and one z-range.
 
 Colour is mapped to the coefficient value using the chosen palette and
 a shared scale across all panels so that magnitudes are visually
@@ -137,29 +136,14 @@ This function uses only base R graphics (\pkg{grDevices} and
 those already required by \pkg{qqr}.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-z1  <- rnorm(n)
-z2  <- rnorm(n)
-y   <- 0.5 + x * qnorm(runif(n)) + 0.3 * z1 - 0.2 * z2
-dat <- data.frame(y = y, x = x, z1 = z1, z2 = z2)
-
-fit <- qqr(y ~ x + z1 + z2, data = dat, qvar = "x",
-           taus = seq(0.05, 0.95, by = 0.05), m = 19)
-
-# Default plot - all coefficients
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
 panel_surface(fit)
-
-# Selected coefficients with custom palette and zero plane
-panel_surface(fit,
-              coef           = c("x", "z1", "z2"),
-              palette        = "RdBu",
-              add_zero_plane = TRUE,
-              theta          = -40,
-              phi            = 30)
-}
+panel_surface(fit, coef = c("x", "w"), palette = "RdBu",
+              add_zero_plane = TRUE)
 
 }
 \seealso{

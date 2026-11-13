@@ -62,20 +62,13 @@ regressor, while the dependent quantile axis corresponds to the
 \code{taus} used in \code{\link{qqr}}.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n  <- 200
-x  <- rnorm(n)
-y  <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat, m = 15)
-
-# Interactive coefficient surface
-Int.plot(fit, coef = "x", what = "coef", add_plane = TRUE, plane_z = 0)
-
-# Interactive p-value surface with 5\% reference plane
-Int.plot(fit, coef = "x", what = "pvalue", add_plane = TRUE, plane_z = 0.05)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (interactive() && requireNamespace("rgl", quietly = TRUE)) {
+  Int.plot(fit, coef = "x", add_plane = TRUE, plane_z = 0)
 }
 
 }

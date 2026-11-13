@@ -2,7 +2,7 @@
 % Please edit documentation in R/qqr-qr.R
 \name{compare.qqr}
 \alias{compare.qqr}
-\title{Compare QQ Regression with Standard QR Coefficients}
+\title{Compare QQR with standard quantile regression}
 \usage{
 \method{compare}{qqr}(
   x,
@@ -17,84 +17,76 @@
 \item{x}{An object of class \code{"qqr"}, as returned by
 \code{\link{qqr}}.}
 
-\item{coef}{Character string giving the coefficient to compare.
-This can be \code{"intercept"} or \code{"(Intercept)"}, the name of
-the quantile regressor, or the name of a control variable.
-At present \code{coef = "all"} is not supported for comparison; call
-the function separately for each coefficient of interest.}
+\item{coef}{Coefficient(s) to compare: the quantile regressor name
+(default), a control name, \code{"intercept"}, a character vector of
+names, or \code{"all"}.}
 
-\item{na.rm}{Logical flag indicating whether \code{NA} values should be
-removed when computing row means}
+\item{na.rm}{Logical; drop \code{NA} cells when averaging over the grid.
+Default \code{TRUE}.}
 
-\item{digits}{Optional integer number of decimal places to which the
-numeric results should be rounded. If \code{NULL}, no rounding is
-applied.}
+\item{digits}{Optional integer; round the returned numbers.}
 
-\item{qr_args}{Optional named list of additional arguments passed to
-\code{\link[quantreg]{rq}} (for example, \code{list(method = "fn")}).}
+\item{qr_args}{Optional named list of extra arguments for
+\code{\link[quantreg]{rq}} (e.g. \code{list(method = "fn")}).}
 
-\item{...}{Currently unused. Included for potential extensibility.}
+\item{...}{Currently unused.}
 }
 \value{
-A data frame with \code{n_pair} rows and three columns:
-\itemize{
-\item \code{tau} – the conditional quantile level.
-\item \code{qr} – the QR coefficient at that \code{tau}.
-\item \code{qqr_mean} – the corresponding QQR row-mean coefficient,
-computed across all conditional quantiles and aligned by index.
-}
+For a single coefficient, a data frame with columns \code{tau},
+\code{qr} (QR coefficient), \code{qqr_mean} (QQR average over the
+grid) and \code{difference} (\code{qqr_mean - qr}). For several
+coefficients, a named list of such data frames.
 }
 \description{
-Compare QR coefficients with row means of QQR surfaces.
-Fits a standard quantile regression (QR) using the same formula, data
-and quantile levels used in the QQR fit, and compares the QR
-coefficients with the \strong{row means} of the corresponding QQR
-coefficient surface.
-
-For each coefficient of interest, the function quietly runs
-\code{\link[quantreg]{rq}} and then constructs a data frame with one
-row per comparison point. When a single coefficient is requested, the
-result has three columns: the quantile level \code{tau}, the QR
-coefficient, and the QQR row-mean coefficient. The QQR row means are
-computed with \code{\link{rowave.qqr}}.
+Compares standard quantile regression (QR) coefficients with QQR
+estimates averaged over the quantiles of the quantile regressor, the
+robustness check proposed by Sim and Zhou (2015). For each
+\eqn{\tau} in the fit, the QQR surface of the chosen coefficient is
+averaged over the grid (\eqn{\theta}) dimension,
+\deqn{\bar\beta(\tau) = \frac{1}{m} \sum_{i=1}^{m}
+      \hat\beta(\theta_i, \tau),}
+and set against the QR coefficient \eqn{\hat\beta^{QR}(\tau)} from
+\code{\link[quantreg]{rq}} on the same data and design.
 }
 \details{
-Suppose the QQR coefficient surface for a given regressor is stored as
-a matrix of dimension \eqn{m \times K}, where \eqn{m} is the number of
-grid points (quantiles of the quantile regressor) and \eqn{K} is the
-number of conditional quantiles \code{taus}. The function first
-computes the row means
-\deqn{\bar\beta_j = \frac{1}{K} \sum_{k=1}^K \beta_{j,k}, \quad
-      j = 1, \dots, m,}
-using \code{\link{rowave.qqr}}.
+The comparison is meaningful when the grid represents the distribution
+of the quantile regressor, i.e. with \code{grid = "quantile"} (the
+default): the equally weighted average over \eqn{\theta_i} then
+approximates the average effect over the distribution of \eqn{X}. With
+\code{grid = "range"} the average weights all parts of the range of
+\eqn{X} equally, including sparse tails, and a message is shown.
 
-It then fits a standard QR,
-\code{rq(formula, tau = x$taus, data = original_data)}, and extracts
-the QR coefficients for the same regressor at each \code{tau}.
+For the slope of the quantile regressor and for control coefficients,
+\eqn{\bar\beta(\tau)} and \eqn{\hat\beta^{QR}(\tau)} estimate comparable
+quantities if the QR model is well specified. For the intercept they are
+not directly comparable: the local intercept is the fitted
+\eqn{\tau}-quantile of \eqn{Y} at \eqn{X = x^\theta}, while the QR
+intercept is evaluated at \eqn{X = 0}.
 
-To construct a one-to-one comparison, the function aligns the first
-\code{n_pair = min(length(x$taus), m)} elements of the QR coefficient
-vector with the first \code{n_pair} row means. In typical empirical
-applications, the grid size \code{m} is chosen equal to the number of
-quantile levels \code{length(x$taus)}, so this alignment is exact.
+Earlier versions (\pkg{qqr} 0.2.0) instead averaged each surface over
+\eqn{\tau} and paired grid point \eqn{j} with \eqn{\tau_j}, which does
+not correspond to the Sim and Zhou comparison; results from those
+versions should be recomputed.
 }
 \examples{
-\dontrun{
-  library(quantreg)
-  set.seed(1)
-  n  <- 200
-  x  <- rnorm(n)
-  z  <- rnorm(n)
-  y  <- x * qnorm(runif(n)) + 0.5 * z
-  dat <- data.frame(y = y, x = x, z = z)
+set.seed(1)
+n   <- 200
+x   <- rnorm(n)
+z   <- rnorm(n)
+y   <- 1 + x + 0.5 * z + rnorm(n)
+dat <- data.frame(y = y, x = x, z = z)
+fit <- qqr(y ~ x + z, data = dat, qvar = "x", m = 5,
+           taus = c(0.25, 0.5, 0.75), se_type = "none")
+compare.qqr(fit, digits = 3)
+compare.qqr(fit, coef = "z", digits = 3)
 
-  fit <- qqr(y ~ x + z, data = dat, qvar = "x", m = 15,
-             taus = seq(0.05, 0.95, by = 0.05))
-  cmp_z <- compare.qqr(fit, coef = "z", digits = 4)
 }
-
+\references{
+Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
+dependence between their quantiles. \emph{Journal of Banking & Finance},
+55, 1--8. \doi{10.1016/j.jbankfin.2015.01.013}
 }
 \seealso{
-\code{\link{qqr}}, \code{\link{rowave.qqr}},
+\code{\link{plot.compare.qqr}}, \code{\link{rowave.qqr}},
 \code{\link[quantreg]{rq}}
 }

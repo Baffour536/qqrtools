@@ -1,122 +1,50 @@
 #' qqrtools: Tools for Quantile-on-Quantile Regression
 #'
-#' The **qqrtools** package provides tools for estimating and analysing
-#' *quantile–on–quantile regression* (QQR) surfaces. QQR extends standard
-#' quantile regression by modelling the response at multiple conditional
-#' quantile levels of a *quantile regressor*, evaluated over a grid of
-#' values of that regressor. This produces a surface of coefficients
-#' indexed by quantile of the regressor (grid) and conditional quantile
-#' level (tau).
+#' @description
+#' \pkg{qqrtools} estimates quantile-on-quantile regression (QQR) surfaces
+#' (Sim and Zhou, 2015): the effect of the \eqn{\theta}-quantile of a
+#' regressor \eqn{X} on the \eqn{\tau}-quantile of a response \eqn{Y},
+#' obtained from kernel-weighted local linear quantile regressions.
 #'
-#' This package implements:
-#'   * Local, kernel-weighted quantile regressions along a grid of the
-#'     quantile regressor.
-#'   * Storage of estimated coefficient and p-value surfaces for the
-#'     intercept, the quantile regressor, and control variables.
-#'   * Consistent user-facing naming of coefficients (no internal
-#'     aliasing).
-#'   * Tools to compare QQR surfaces with standard quantile regression
-#'     (QR), including row means of QQR surfaces.
-#'   * Flexible extraction and export utilities (wide/long surfaces,
-#'     Excel, Word).
-#'   * Static and interactive 3D visualisations of surfaces.
+#' @section Main functions:
+#' \describe{
+#'   \item{Estimation}{\code{\link{qqr}} fits the model and returns an object
+#'     of class \code{"qqr"} with coefficient and p-value surfaces for the
+#'     intercept, the quantile regressor and any controls.}
+#'   \item{Summaries}{\code{print}, \code{\link{summary.qqr}},
+#'     \code{\link{qqr_surface}} (wide or long tables) and
+#'     \code{\link{rowave.qqr}} (averages over \eqn{\tau}).}
+#'   \item{Comparison with QR}{\code{\link{compare.qqr}} averages each
+#'     surface over \eqn{\theta} and compares it with standard quantile
+#'     regression; \code{\link{plot.compare.qqr}},
+#'     \code{\link{excel.compare.qqr}} and \code{\link{word.compare.qqr}}
+#'     plot and export the comparison.}
+#'   \item{Graphics}{\code{\link{surface3d}}, \code{\link{panel_surface}} and
+#'     \code{\link{plot.qqr}} (base graphics); \code{\link{Int.plot}}
+#'     (\pkg{rgl}); \code{\link{qqr_heatmap}}, \code{\link{qqr_contour}} and
+#'     \code{\link{qqr_plotly}} (\pkg{plotly}).}
+#'   \item{Data diagnostics}{\code{\link{qqr_cor_heatmap}} summarises the
+#'     bivariate quantile dependence of \eqn{X} and \eqn{Y}.}
+#'   \item{Export}{\code{\link{excel.qqr}} and \code{\link{word.qqr}}.}
+#' }
 #'
-#' ## Key Features
+#' @section Migrating from qqr:
+#' The package was previously called \pkg{qqr}. Replace
+#' \code{library(qqr)} with \code{library(qqrtools)}; function names are
+#' unchanged. Version 0.3.0 changes the default grid to empirical quantiles
+#' of the regressor and corrects \code{compare.qqr()}; use
+#' \code{grid = "range"} to reproduce the grid of \pkg{qqr} 0.2.0. See
+#' \code{NEWS.md} for details.
 #'
-#' ### Model Estimation
-#' - **`qqr()`**: Fit a QQR model given a formula, data frame, and
-#'   user-specified quantile regressor (`qvar`). The function returns
-#'   an object of class `"qqr"` containing coefficient and p-value
-#'   surfaces, grid values, quantile indices (`taus`), and the data
-#'   used in the fit.
-#' - Data used in the original fit is stored in the object (`fit$data`)
-#'   to enable robust post-estimation comparisons and exports, avoiding
-#'   scoping issues when re-evaluating calls.
+#' @references
+#' Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
+#' dependence between their quantiles. \emph{Journal of Banking & Finance},
+#' 55, 1--8. \doi{10.1016/j.jbankfin.2015.01.013}
 #'
-#' ### Naming Conventions
-#' - Coefficients are named using **user-facing variable names**:
-#'   - `"(Intercept)"` for the model intercept (if present)
-#'   - The original `qvar` name for the quantile regressor
-#'   - Control variables as given in the formula
-#' - The internal local regressor (“z = x − z0”) is **never exposed** in
-#'   public surfaces or comparisons.
+#' Koenker, R. (2005) \emph{Quantile Regression}. Cambridge University
+#' Press. \doi{10.1017/CBO9780511754098}
 #'
-#' ### Comparison with Standard Quantile Regression
-#' - **`compare.qqr()`**: Compares the row means of a QQR coefficient
-#'   surface with coefficients from standard quantile regression
-#'   (`quantreg::rq`). For each coefficient of interest, it returns
-#'   a data frame with columns:
-#'     * `tau`: quantile level
-#'     * `qr`: coefficient from standard QR
-#'     * `qqr_mean`: row-mean of the QQR surface
-#' - Invalid coefficient names (e.g., internal aliases like `"z"`) are
-#'   rejected with informative errors.
-#' - Multi-coefficient comparisons (e.g., `coef = c("x", "z1")`) return
-#'   a named list of comparison data frames.
-#'
-#' ### Surface Extraction
-#' - **`qqr_surface()`**: Extract wide or long format tables for
-#'   coefficient and p-value surfaces.
-#' - Allows subsetting by grid points and quantile levels (`taus`).
-#' - Supports optional rounding for display and export.
-#'
-#' - **`rowave.qqr()`**: Computes row means across quantile levels for
-#'   a specified coefficient or all coefficients, with tidy labelling.
-#'
-#' ### Export Utilities
-#' - **`excel.qqr()`**: Writes coefficient or p-value surfaces to an
-#'   Excel workbook (one sheet per coefficient), with grid values and
-#'   optional rounding.
-#' - **`word.qqr()`**: Writes the same to a Word document with formatted
-#'   tables (requires `officer` and `flextable`).
-#'
-#' ### Static and Interactive Plotting
-#' - **`plot.qqr()`**: Static 3D visualisation of coefficient or p-value
-#'   surfaces using multiple engines:
-#'     * `"base"` — built-in R graphics
-#'     * `"plot3D"` — enhanced 3D visualisation if installed
-#' - **`Int.plot()`**: Interactive 3D plots (requires `rgl`).
-#'
-#' ## Typical Workflow
-#' 1. Fit a QQR model:
-#'    ```r
-#'    fit <- qqr(
-#'      y ~ qvar + controls,
-#'      data = df,
-#'      qvar = "qvar",
-#'      taus = seq(0.05, 0.95, by = 0.05),
-#'      m    = 19,
-#'      h    = 0.05
-#'    )
-#'    ```
-#' 2. View scalar summaries:
-#'    ```r
-#'    summary(fit)
-#'    ```
-#' 3. Compare with standard quantile regression:
-#'    ```r
-#'    cmp <- compare.qqr(fit, coef = "qvar")
-#'    ```
-#' 4. Extract surfaces for reporting or export:
-#'    ```r
-#'    surf <- qqr_surface(fit, coef = "qvar", long = TRUE)
-#'    excel.qqr(fit, file = "qqr_surfaces.xlsx")
-#'    word.qqr(fit, file = "qqr_surfaces.docx")
-#'    ```
-#' 5. Visualise:
-#'    ```r
-#'    plot(fit, coef = "qvar", what = "coef", engine = "plot3D")
-#'    Int.plot(fit, coef = "qvar", what = "coef")
-#'    ```
-#'
-#' ## Dependencies
-#' - `quantreg` for quantile regression fitting
-#' - `openxlsx` for Excel export
-#' - `officer` and `flextable` for Word export
-#' - `plot3D` and `rgl` (optional) for enhanced plotting
-#'
-#' @docType package
-#' @name qqrtools
+#' @keywords internal
 #' @importFrom stats setNames
 #' @importFrom graphics par layout persp polygon text axis box image
 #' @importFrom grDevices hcl.colors adjustcolor

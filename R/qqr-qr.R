@@ -10,84 +10,75 @@ compare <- function(x, ...) {
 
 
 
-#' @title Compare QQ Regression with Standard QR Coefficients
-#' @description Compare QR coefficients with row means of QQR surfaces.
-#' Fits a standard quantile regression (QR) using the same formula, data
-#' and quantile levels used in the QQR fit, and compares the QR
-#' coefficients with the **row means** of the corresponding QQR
-#' coefficient surface.
+#' @title Compare QQR with standard quantile regression
 #'
-#' For each coefficient of interest, the function quietly runs
-#' \code{\link[quantreg]{rq}} and then constructs a data frame with one
-#' row per comparison point. When a single coefficient is requested, the
-#' result has three columns: the quantile level \code{tau}, the QR
-#' coefficient, and the QQR row-mean coefficient. The QQR row means are
-#' computed with \code{\link{rowave.qqr}}.
-#'
+#' @description
+#' Compares standard quantile regression (QR) coefficients with QQR
+#' estimates averaged over the quantiles of the quantile regressor, the
+#' robustness check proposed by Sim and Zhou (2015). For each
+#' \eqn{\tau} in the fit, the QQR surface of the chosen coefficient is
+#' averaged over the grid (\eqn{\theta}) dimension,
+#' \deqn{\bar\beta(\tau) = \frac{1}{m} \sum_{i=1}^{m}
+#'       \hat\beta(\theta_i, \tau),}
+#' and set against the QR coefficient \eqn{\hat\beta^{QR}(\tau)} from
+#' \code{\link[quantreg]{rq}} on the same data and design.
 #'
 #' @param x An object of class \code{"qqr"}, as returned by
 #'   \code{\link{qqr}}.
-#' @param coef Character string giving the coefficient to compare.
-#'   This can be \code{"intercept"} or \code{"(Intercept)"}, the name of
-#'   the quantile regressor, or the name of a control variable.
-#'   At present \code{coef = "all"} is not supported for comparison; call
-#'   the function separately for each coefficient of interest.
-#' @param na.rm Logical flag indicating whether \code{NA} values should be
-#'   removed when computing row means
-#' @param digits Optional integer number of decimal places to which the
-#'   numeric results should be rounded. If \code{NULL}, no rounding is
-#'   applied.
-#' @param qr_args Optional named list of additional arguments passed to
-#'   \code{\link[quantreg]{rq}} (for example, \code{list(method = "fn")}).
-#' @param ... Currently unused. Included for potential extensibility.
+#' @param coef Coefficient(s) to compare: the quantile regressor name
+#'   (default), a control name, \code{"intercept"}, a character vector of
+#'   names, or \code{"all"}.
+#' @param na.rm Logical; drop \code{NA} cells when averaging over the grid.
+#'   Default \code{TRUE}.
+#' @param digits Optional integer; round the returned numbers.
+#' @param qr_args Optional named list of extra arguments for
+#'   \code{\link[quantreg]{rq}} (e.g. \code{list(method = "fn")}).
+#' @param ... Currently unused.
 #'
 #' @details
-#' Suppose the QQR coefficient surface for a given regressor is stored as
-#' a matrix of dimension \eqn{m \times K}, where \eqn{m} is the number of
-#' grid points (quantiles of the quantile regressor) and \eqn{K} is the
-#' number of conditional quantiles \code{taus}. The function first
-#' computes the row means
-#' \deqn{\bar\beta_j = \frac{1}{K} \sum_{k=1}^K \beta_{j,k}, \quad
-#'       j = 1, \dots, m,}
-#' using \code{\link{rowave.qqr}}.
+#' The comparison is meaningful when the grid represents the distribution
+#' of the quantile regressor, i.e. with \code{grid = "quantile"} (the
+#' default): the equally weighted average over \eqn{\theta_i} then
+#' approximates the average effect over the distribution of \eqn{X}. With
+#' \code{grid = "range"} the average weights all parts of the range of
+#' \eqn{X} equally, including sparse tails, and a message is shown.
 #'
-#' It then fits a standard QR,
-#' \code{rq(formula, tau = x$taus, data = original_data)}, and extracts
-#' the QR coefficients for the same regressor at each \code{tau}.
+#' For the slope of the quantile regressor and for control coefficients,
+#' \eqn{\bar\beta(\tau)} and \eqn{\hat\beta^{QR}(\tau)} estimate comparable
+#' quantities if the QR model is well specified. For the intercept they are
+#' not directly comparable: the local intercept is the fitted
+#' \eqn{\tau}-quantile of \eqn{Y} at \eqn{X = x^\theta}, while the QR
+#' intercept is evaluated at \eqn{X = 0}.
 #'
-#' To construct a one-to-one comparison, the function aligns the first
-#' \code{n_pair = min(length(x$taus), m)} elements of the QR coefficient
-#' vector with the first \code{n_pair} row means. In typical empirical
-#' applications, the grid size \code{m} is chosen equal to the number of
-#' quantile levels \code{length(x$taus)}, so this alignment is exact.
+#' Earlier versions (\pkg{qqr} 0.2.0) instead averaged each surface over
+#' \eqn{\tau} and paired grid point \eqn{j} with \eqn{\tau_j}, which does
+#' not correspond to the Sim and Zhou comparison; results from those
+#' versions should be recomputed.
 #'
-#' @return
-#' A data frame with \code{n_pair} rows and three columns:
-#' \itemize{
-#'   \item \code{tau} – the conditional quantile level.
-#'   \item \code{qr} – the QR coefficient at that \code{tau}.
-#'   \item \code{qqr_mean} – the corresponding QQR row-mean coefficient,
-#'         computed across all conditional quantiles and aligned by index.
-#' }
+#' @return For a single coefficient, a data frame with columns \code{tau},
+#'   \code{qr} (QR coefficient), \code{qqr_mean} (QQR average over the
+#'   grid) and \code{difference} (\code{qqr_mean - qr}). For several
+#'   coefficients, a named list of such data frames.
 #'
-#' @seealso
-#' \code{\link{qqr}}, \code{\link{rowave.qqr}},
-#' \code{\link[quantreg]{rq}}
+#' @seealso \code{\link{plot.compare.qqr}}, \code{\link{rowave.qqr}},
+#'   \code{\link[quantreg]{rq}}
+#'
+#' @references
+#' Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
+#' dependence between their quantiles. \emph{Journal of Banking & Finance},
+#' 55, 1--8. \doi{10.1016/j.jbankfin.2015.01.013}
 #'
 #' @examples
-#' \dontrun{
-#'   library(quantreg)
-#'   set.seed(1)
-#'   n  <- 200
-#'   x  <- rnorm(n)
-#'   z  <- rnorm(n)
-#'   y  <- x * qnorm(runif(n)) + 0.5 * z
-#'   dat <- data.frame(y = y, x = x, z = z)
-#'
-#'   fit <- qqr(y ~ x + z, data = dat, qvar = "x", m = 15,
-#'              taus = seq(0.05, 0.95, by = 0.05))
-#'   cmp_z <- compare.qqr(fit, coef = "z", digits = 4)
-#' }
+#' set.seed(1)
+#' n   <- 200
+#' x   <- rnorm(n)
+#' z   <- rnorm(n)
+#' y   <- 1 + x + 0.5 * z + rnorm(n)
+#' dat <- data.frame(y = y, x = x, z = z)
+#' fit <- qqr(y ~ x + z, data = dat, qvar = "x", m = 5,
+#'            taus = c(0.25, 0.5, 0.75), se_type = "none")
+#' compare.qqr(fit, digits = 3)
+#' compare.qqr(fit, coef = "z", digits = 3)
 #'
 #' @export
 #' @method compare qqr
@@ -99,182 +90,95 @@ compare.qqr <- function(x,
                         qr_args = list(),
                         ...) {
 
-  ## ---------------------------------------------------------------------
-  ## Basic validation
-  ## ---------------------------------------------------------------------
-  if (!inherits(x, "qqr")) {
-    stop("Object must be of class 'qqr'.")
-  }
-  if (!requireNamespace("quantreg", quietly = TRUE)) {
-    stop("Package 'quantreg' is required for compare.qqr().")
-  }
+  if (!inherits(x, "qqr"))
+    stop("Object must be of class 'qqr'.", call. = FALSE)
+  if (!is.list(qr_args))
+    stop("'qr_args' must be a list.", call. = FALSE)
 
   ## ---------------------------------------------------------------------
-  ## Helper: normalise coefficient input (user-facing only)
+  ## Several coefficients -> list
   ## ---------------------------------------------------------------------
-  normalise_coef <- function(coef_in) {
-    if (!is.character(coef_in) || length(coef_in) != 1L) return(coef_in)
-    if (identical(coef_in, "intercept")) return("(Intercept)")
-    coef_in
+  if (length(coef) == 1L && identical(tolower(coef), "all"))
+    coef <- .qqr_user_coefs(x)
+  if (length(coef) > 1L) {
+    if (!is.character(coef))
+      stop("'coef' must be a character vector.", call. = FALSE)
+    nms <- vapply(coef, function(cn) .qqr_match_coef(x, cn), character(1L),
+                  USE.NAMES = FALSE)
+    out <- lapply(nms, function(nm)
+      compare.qqr(x, coef = nm, na.rm = na.rm, digits = digits,
+                  qr_args = qr_args))
+    return(stats::setNames(out, nms))
   }
 
-  ## User-facing coefficient universe
-  user_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent,
-    x$controls
+  if (identical(coef, "z") && !("z" %in% names(x$coef_surfaces)))
+    stop("Coefficient 'z' is not a model coefficient. Use the original ",
+         "variable name: '", x$independent, "'.", call. = FALSE)
+  nm <- .qqr_match_coef(x, coef)
+
+  if (identical(x$grid_type, "range") || is.null(x$grid_type))
+    message("compare.qqr(): the grid is equally spaced over the range of ",
+            x$independent, ", so the average over the grid is not an ",
+            "average over its distribution. Consider grid = \"quantile\".")
+
+  ## ---------------------------------------------------------------------
+  ## Standard QR on the same design
+  ## ---------------------------------------------------------------------
+  des <- .qqr_design(x)
+  vn  <- paste0("v", seq_len(ncol(des$X)))
+  df  <- as.data.frame(des$X)
+  names(df) <- vn
+  df$.y <- des$y
+  form <- stats::as.formula(paste(".y ~ 0 +", paste(vn, collapse = " + ")))
+
+  qr_fit <- tryCatch(
+    suppressWarnings(do.call(quantreg::rq,
+                             c(list(formula = form, data = df,
+                                    tau = x$taus), qr_args))),
+    error = function(e)
+      stop("Standard quantile regression failed: ", conditionMessage(e),
+           call. = FALSE)
   )
+  cm <- matrix(stats::coef(qr_fit), nrow = length(vn),
+               dimnames = list(colnames(des$X), NULL))
+  stored <- if (nm == "z") x$independent else nm
+  if (!(stored %in% rownames(cm)))
+    stop("Coefficient '", coef, "' not found in the QR fit.", call. = FALSE)
+  qr_vec <- as.numeric(cm[stored, ])
 
   ## ---------------------------------------------------------------------
-  ## Handle coef = "all" or vector input
+  ## QQR average over the grid (theta) for each tau
   ## ---------------------------------------------------------------------
-  if (length(coef) > 1L || identical(coef, "all")) {
-
-    if (identical(coef, "all")) {
-      coef_vec <- user_coefs
-    } else {
-      if (!is.character(coef)) {
-        stop("When 'coef' has length > 1, it must be a character vector.")
-      }
-      coef_vec <- vapply(coef, normalise_coef, character(1L))
-    }
-
-    out <- setNames(vector("list", length(coef_vec)), coef_vec)
-    for (nm in coef_vec) {
-      out[[nm]] <- compare.qqr(
-        x       = x,
-        coef    = nm,
-        na.rm   = na.rm,
-        digits  = digits,
-        qr_args = qr_args
-      )
-    }
-    return(out)
-  }
-
-  ## ---------------------------------------------------------------------
-  ## Single coefficient path
-  ## ---------------------------------------------------------------------
-  if (!is.character(coef) || length(coef) != 1L) {
-    stop("Argument 'coef' must be a single character string.")
-  }
-
-  coef <- normalise_coef(coef)
-
-  ## Explicit rejection of internal aliases
-  if (identical(coef, "z")) {
-    stop(
-      "Coefficient 'z' is an internal QQR alias and cannot be used here. ",
-      "Use the original variable name: '", x$independent, "'."
-    )
-  }
-
-  if (!coef %in% user_coefs) {
-    stop(
-      "Coefficient '", coef, "' was not found in the model. ",
-      "Available coefficients are: ",
-      paste(user_coefs, collapse = ", "),
-      "."
-    )
-  }
-
-  ## ---------------------------------------------------------------------
-  ## Reconstruct formula and data robustly
-  ## ---------------------------------------------------------------------
-  cl <- x$call
-  if (is.null(cl$formula)) {
-    stop("The original qqr call does not contain a 'formula'.")
-  }
-
-  ## Formula
-  call_env <- environment(cl$formula)
-  if (is.null(call_env)) call_env <- parent.frame()
-  qr_formula <- eval(cl$formula, envir = call_env)
-
-  ## Data: prefer stored data, fallback to call$data
-  if (!is.null(x$data)) {
-    qr_data <- x$data
-  } else if (!is.null(cl$data)) {
-    qr_data <- eval(cl$data, envir = call_env)
-  } else {
-    stop(
-      "Cannot reconstruct the data used in the qqr fit. ",
-      "The qqr object should store the original data."
-    )
-  }
-
-  if (!is.data.frame(qr_data)) {
-    stop("Reconstructed data is not a data.frame.")
-  }
-
-  taus <- x$taus
-
-  ## ---------------------------------------------------------------------
-  ## Fit standard QR
-  ## ---------------------------------------------------------------------
-  rq_args <- c(
-    list(
-      formula = qr_formula,
-      data    = qr_data,
-      tau     = taus
-    ),
-    qr_args
-  )
-
-  qr_fit   <- do.call(quantreg::rq, rq_args)
-  coef_mat <- coef(qr_fit)
-
-  if (is.null(rownames(coef_mat))) {
-    stop("QR coefficient matrix has no row names.")
-  }
-
-  if (!coef %in% rownames(coef_mat)) {
-    stop(
-      "Coefficient '", coef, "' was not found in the QR fit. ",
-      "Available QR coefficients are: ",
-      paste(rownames(coef_mat), collapse = ", "),
-      "."
-    )
-  }
-
-  qr_vec <- as.numeric(coef_mat[coef, ])
-
-  ## ---------------------------------------------------------------------
-  ## QQR row means
-  ## ---------------------------------------------------------------------
-  rm_df <- rowave.qqr(
-    x,
-    coef               = coef,
-    na.rm              = na.rm,
-    digits             = NULL,
-    include_grid_value = FALSE
-  )
-
-  mean_col <- setdiff(names(rm_df), "grid_index")
-  if (length(mean_col) != 1L) {
-    stop("rowave.qqr() returned an unexpected structure.")
-  }
-
-  qqr_vec <- rm_df[[mean_col]]
-
-  ## ---------------------------------------------------------------------
-  ## Align QR and QQR vectors
-  ## ---------------------------------------------------------------------
-  n_pair <- min(length(taus), length(qqr_vec))
+  surf    <- x$coef_surfaces[[nm]]
+  qqr_vec <- as.numeric(colMeans(surf, na.rm = na.rm))
+  qqr_vec[is.nan(qqr_vec)] <- NA_real_
 
   out <- data.frame(
-    tau      = taus[seq_len(n_pair)],
-    qr       = qr_vec[seq_len(n_pair)],
-    qqr_mean = qqr_vec[seq_len(n_pair)]
+    tau        = x$taus,
+    qr         = qr_vec,
+    qqr_mean   = qqr_vec,
+    difference = qqr_vec - qr_vec
   )
 
-  if (!is.null(digits)) {
-    out[] <- lapply(out, function(v) {
-      if (is.numeric(v)) round(v, digits) else v
-    })
-  }
+  if (!is.null(digits))
+    out[] <- lapply(out, function(v) if (is.numeric(v)) round(v, digits) else v)
 
   out
+}
+
+## Response and uncentred design matrix of a fit (also for qqr 0.2.0
+## objects, which did not store them).
+## @noRd
+.qqr_design <- function(x) {
+  if (!is.null(x$design) && !is.null(x$y))
+    return(list(X = x$design, y = x$y))
+  mf <- x$data
+  if (is.null(mf))
+    stop("The qqr object does not contain its data; re-fit it with the ",
+         "current version of qqrtools.", call. = FALSE)
+  tt <- attr(mf, "terms")
+  X  <- stats::model.matrix(tt, mf)
+  list(X = X, y = as.numeric(stats::model.response(mf)))
 }
 
 
@@ -313,6 +217,16 @@ compare.qqr <- function(x,
 #' @seealso
 #' \code{\link{compare.qqr}}, \code{\link{word.compare.qqr}},
 #' \code{\link{excel.qqr}}
+#'
+#' @examples
+#' set.seed(1)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("openxlsx", quietly = TRUE)) {
+#'   excel.compare.qqr(fit, file = tempfile(fileext = ".xlsx"), coef = "all")
+#' }
 #'
 #' @export
 excel.compare.qqr <- function(x,
@@ -379,8 +293,9 @@ excel.compare.qqr <- function(x,
 #'
 #' @details
 #' For each requested coefficient, the function inserts a short heading
-#' and a table with three columns (\code{tau}, \code{qr},
-#' \code{qqr_mean}) into the Word document. This layout is convenient
+#' and a table with the columns returned by \code{\link{compare.qqr}}
+#' (\code{tau}, \code{qr}, \code{qqr_mean}, \code{difference}) into the
+#' Word document. This layout is convenient
 #' for reproducing the typical empirical comparison of QR and average
 #' QQR coefficients across quantiles.
 #'
@@ -391,6 +306,17 @@ excel.compare.qqr <- function(x,
 #' \code{\link{compare.qqr}}, \code{\link{word.qqr}},
 #' \code{\link[officer]{read_docx}},
 #' \code{\link[flextable]{flextable}}
+#'
+#' @examples
+#' set.seed(1)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("officer", quietly = TRUE) &&
+#'     requireNamespace("flextable", quietly = TRUE)) {
+#'   word.compare.qqr(fit, file = tempfile(fileext = ".docx"), digits = 3)
+#' }
 #'
 #' @export
 word.compare.qqr <- function(x,
@@ -430,7 +356,7 @@ word.compare.qqr <- function(x,
   }
 
   if (is.data.frame(cmp)) {
-    add_one(cmp, as.character(coef))
+    add_one(cmp, paste(as.character(coef), collapse = ", "))
   } else {
     for (nm in names(cmp)) {
       add_one(cmp[[nm]], nm)
@@ -477,6 +403,16 @@ word.compare.qqr <- function(x,
 #'
 #' @seealso
 #' \code{\link{compare.qqr}}, \code{\link{plot.qqr}}
+#'
+#' @examples
+#' set.seed(1)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("ggplot2", quietly = TRUE)) {
+#'   plot.compare.qqr(fit)
+#' }
 #'
 #' @export
 #' @method plot compare.qqr

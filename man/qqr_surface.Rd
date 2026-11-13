@@ -34,10 +34,11 @@ p-values.}
 If \code{NULL} (the default), all grid points are used. Values
 outside the valid range are truncated to the nearest valid index.}
 
-\item{tau_subset}{Optional subset of quantile levels. This can be
-either a numeric vector of indices into \code{x$taus} or a numeric
-vector of quantile values to be matched to \code{x$taus}. If
-\code{NULL}, all quantile levels are used.}
+\item{tau_subset}{Optional subset of quantile levels: either integer
+indices into \code{x$taus} (values \eqn{\ge 1}) or quantile values in
+\eqn{(0, 1)} that are matched to \code{x$taus} (with a tolerance of
+\code{1e-8}; unmatched values give an error). If \code{NULL}, all
+quantile levels are used.}
 
 \item{include_grid_value}{Logical flag indicating whether to include a
 column containing the actual grid values (the locations of the
@@ -88,25 +89,15 @@ Rounding through \code{digits} only affects the returned data frame and
 does not modify the stored QQR object.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n  <- 200
-x  <- rnorm(n)
-y  <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat, m = 15)
-
-# Wide matrix for the quantile regressor coefficient
-surf_q <- qqr_surface(fit, coef = "x", what = "coef",
-                      long = FALSE, digits = 4)
-head(surf_q)
-
-# Long tidy table for all coefficients and all quantiles
-surf_all <- qqr_surface(fit, coef = "all", what = "coef",
-                        long = TRUE, digits = 4)
-head(surf_all)
-}
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+## Wide table: one row per grid point, one column per tau
+qqr_surface(fit, coef = "x", digits = 3)
+## Long (tidy) table for all coefficients
+head(qqr_surface(fit, coef = "all", long = TRUE))
 
 }
 \seealso{

@@ -1,855 +1,451 @@
 ## =========================================================================
 ## qqr-core.R
-## Core fitting function and internal helpers for the qqr package.
-## =========================================================================
-
-
-## -------------------------------------------------------------------------
-## Internal: bandwidth selector
-## -------------------------------------------------------------------------
-## Computes the kernel bandwidth h from the quantile-regressor vector x
-## (and, where needed, the outcome vector y).
-##
-## method = "silverman"  : h = 1.06 * sd(x) * n^{-1/5}
-## method = "robust"     : h = 0.9 * min(sd(x), IQR(x)/1.34) * n^{-1/5}
-## method = "iqr"        : h = IQR(x) * n^{-1/5}
-## method = "cv_fast"    : LOO quantile-loss, 15-point grid (no extra pkg)
-## method = "sj"         : Sheather-Jones solve-the-equation plug-in
-##                         (base R bw.SJ; density-based)
-## method = "yj"         : Ruppert-Sheather-Wand direct plug-in
-##                         (KernSmooth::dpill; regression-based, uses x & y)
-## method = "npcv"       : npregbw LS cross-validation (np package)
-## method = "sc"         : npscoefbw smooth-coefficient CV (np package)
-##
-## Returns a named list:
-##   $h        numeric bandwidth
-##   $method   character label used in print/summary output
-##   $details  character description suitable for reporting
-## @keywords internal
-.qqr_select_h <- function(x, y = NULL, method, taus, m, kernel, se_type) {
-
-  n   <- length(x)
-  s   <- stats::sd(x,  na.rm = TRUE)
-  iqr <- stats::IQR(x, na.rm = TRUE)
-
-  if (n < 4L)
-    stop("Too few observations to select bandwidth automatically.")
-
-  ## ------------------------------------------------------------------
-  ## 1. Silverman's rule of thumb
-  ##    h = 1.06 * sd(x) * n^{-1/5}
-  ##    Source: Silverman (1986, p. 48)
-  ## ------------------------------------------------------------------
-  if (method == "silverman") {
-    h <- 1.06 * s * n^(-0.2)
-    return(list(
-      h       = h,
-      method  = "silverman",
-      details = paste0(
-        "Silverman's rule of thumb  [h = 1.06 * sd(x) * n^(-1/5)]",
-        "\n               Reference : Silverman (1986) Density Estimation",
-        " for Statistics and Data Analysis, Chapman & Hall",
-        "\n               sd(x) = ", round(s, 6L),
-        ",  n = ", n,
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 2. Robust rule of thumb  (Silverman with IQR correction)
-  ##    h = 0.9 * min(sd(x), IQR(x)/1.34) * n^{-1/5}
-  ##    Sources: Silverman (1986, p. 47); Scott (1992, p. 131)
-  ## ------------------------------------------------------------------
-  if (method == "robust") {
-    scale <- min(s, iqr / 1.34)
-    if (!is.finite(scale) || scale <= 0) scale <- s
-    h <- 0.9 * scale * n^(-0.2)
-    return(list(
-      h       = h,
-      method  = "robust",
-      details = paste0(
-        "Robust rule of thumb  [h = 0.9 * min(sd, IQR/1.34) * n^(-1/5)]",
-        "\n               Reference : Silverman (1986); Scott (1992)",
-        " Multivariate Density Estimation, Wiley",
-        "\n               sd(x) = ", round(s, 6L),
-        ",  IQR(x) = ", round(iqr, 6L),
-        ",  scale = ", round(scale, 6L),
-        ",  n = ", n,
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 3. IQR-based rule
-  ##    h = IQR(x) * n^{-1/5}
-  ## ------------------------------------------------------------------
-  if (method == "iqr") {
-    if (!is.finite(iqr) || iqr <= 0)
-      stop("IQR of the quantile regressor is zero or non-finite. ",
-           "Use method = 'silverman' or 'robust' instead.")
-    h <- iqr * n^(-0.2)
-    return(list(
-      h       = h,
-      method  = "iqr",
-      details = paste0(
-        "IQR-based rule  [h = IQR(x) * n^(-1/5)]",
-        "\n               IQR(x) = ", round(iqr, 6L),
-        ",  n = ", n,
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 4. Fast LOO cross-validation (no additional packages required)
-  ##    Renamed from "cv" to "cv_fast"; minimises quantile check-loss
-  ##    at tau = 0.5 over a 15-point grid in [0.5*h_sj, 2*h_sj].
-  ##    Source: Yu and Jones (1998, JASA 93, 228-237)
-  ## ------------------------------------------------------------------
-  if (method == "cv_fast") {
-    h_silver  <- 1.06 * s * n^(-0.2)
-    h_grid    <- seq(0.5 * h_silver, 2.0 * h_silver, length.out = 15L)
-    tau_cv    <- 0.5
-    x_clean   <- x[is.finite(x)]
-    n_cv      <- length(x_clean)
-
-    cv_scores <- vapply(h_grid, function(h_cand) {
-      errors <- vapply(seq_len(n_cv), function(i) {
-        x_loo <- x_clean[-i]
-        wx    <- switch(kernel,
-                        gaussian = stats::dnorm((x_loo - x_clean[i]) / h_cand))
-        eff_n <- sum(wx[is.finite(wx)], na.rm = TRUE)
-        if (!is.finite(eff_n) || eff_n < 1e-10) return(NA_real_)
-        ord   <- order(x_loo)
-        w_ord <- wx[ord]
-        w_cum <- cumsum(w_ord) / sum(w_ord, na.rm = TRUE)
-        pred  <- x_loo[ord][which(w_cum >= tau_cv)[1L]]
-        if (is.na(pred)) return(NA_real_)
-        u <- x_clean[i] - pred
-        ifelse(u >= 0, tau_cv * u, (tau_cv - 1) * u)
-      }, numeric(1L))
-      mean(errors, na.rm = TRUE)
-    }, numeric(1L))
-
-    if (all(is.na(cv_scores)))
-      stop("cv_fast: cross-validation failed for all candidate bandwidths. ",
-           "Use method = 'silverman' or 'robust' instead.")
-
-    h_opt <- h_grid[which.min(cv_scores)]
-
-    return(list(
-      h       = h_opt,
-      method  = "cv_fast",
-      details = paste0(
-        "Fast LOO cross-validation  [15-point grid, quantile loss at tau=0.5]",
-        "\n               Reference : Yu and Jones (1998) Local linear quantile",
-        " regression, JASA 93(441), 228-237",
-        "\n               Search range: [", round(min(h_grid), 6L),
-        ", ", round(max(h_grid), 6L), "]",
-        "\n               Optimal h = ", round(h_opt, 6L),
-        "  (minimises LOO quantile-loss at tau = 0.5)"
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 5. Sheather-Jones solve-the-equation plug-in  (h = "sj")
-  ##    Uses base R bw.SJ() -- no additional packages required.
-  ##    Solves iteratively for h satisfying:
-  ##      h = [ R(K) / (n * psi4_hat(g(h))) ]^{1/5}
-  ##    where psi4_hat is a pilot estimate of int[f''(x)]^2 dx and
-  ##    g(h) is a pilot bandwidth for that estimate.
-  ##    Sources: Sheather and Jones (1991, JRSS-B 53, 683-690)
-  ##             Jones, Marron and Sheather (1996, JASA 91, 401-407)
-  ## ------------------------------------------------------------------
-  if (method == "sj") {
-    h <- tryCatch(
-      stats::bw.SJ(x[is.finite(x)]),
-      error = function(e) {
-        warning("SJ bandwidth selection failed (", conditionMessage(e),
-                "). Falling back to Silverman rule.")
-        1.06 * s * n^(-0.2)
-      }
-    )
-    return(list(
-      h       = h,
-      method  = "sj",
-      details = paste0(
-        "Sheather-Jones solve-the-equation plug-in  [bw.SJ(x)]",
-        "\n               References:",
-        "\n                 Sheather & Jones (1991) A reliable data-based",
-        " bandwidth selection method for kernel density estimation.",
-        "\n                 J. Royal Statistical Society B, 53(3), 683-690.",
-        "\n                 Jones, Marron & Sheather (1996) A brief survey of",
-        " bandwidth selection for density estimation.",
-        "\n                 J. American Statistical Association, 91(433),",
-        " 401-407.",
-        "\n               n = ", n,
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 6. Ruppert-Sheather-Wand direct plug-in  (h = "yj")
-  ##    Uses KernSmooth::dpill(x, y) -- KernSmooth is a recommended
-  ##    package that ships with standard R installations.
-  ##    Minimises the MISE of a local linear regression of y on x:
-  ##      h_opt = [ sigma^2 int K^2 / (n f_X(x) [m''(x)]^2 mu2^2) ]^{1/5}
-  ##    m''(x) is estimated from pilot fits using Mallows Cp block size.
-  ##    This is the only method here that uses BOTH x and y and is
-  ##    tuned to regression (not density) loss -- making it the most
-  ##    structurally appropriate selector for QQR.
-  ##    Source: Ruppert, Sheather & Wand (1995, JASA 90, 1257-1270)
-  ## ------------------------------------------------------------------
-  if (method == "yj") {
-    if (is.null(y))
-      stop("method = 'yj' requires the outcome vector y. ",
-           "Make sure y is passed to .qqr_select_h().")
-
-    if (!requireNamespace("KernSmooth", quietly = TRUE))
-      stop("method = 'yj' requires the 'KernSmooth' package. ",
-           "It is a recommended R package; install it with: ",
-           "install.packages('KernSmooth')")
-
-    x_fin <- x[is.finite(x) & is.finite(y)]
-    y_fin <- y[is.finite(x) & is.finite(y)]
-    n_fin <- length(x_fin)
-
-    if (n_fin < 10L)
-      stop("Too few finite observations for the YJ plug-in selector.")
-
-    h <- tryCatch({
-      tn <- n_fin - 1L
-      KernSmooth::dpill(x_fin, y_fin, gridsize = tn)
-    }, error = function(e) {
-      warning("YJ (dpill) bandwidth selection failed (", conditionMessage(e),
-              "). Falling back to Silverman rule.")
-      1.06 * s * n^(-0.2)
-    })
-
-    if (!is.finite(h) || h <= 0) {
-      warning("dpill returned a non-positive bandwidth. ",
-              "Falling back to Silverman rule.")
-      h <- 1.06 * s * n^(-0.2)
-    }
-
-    return(list(
-      h       = h,
-      method  = "yj",
-      details = paste0(
-        "Ruppert-Sheather-Wand direct plug-in  [KernSmooth::dpill(x, y)]",
-        "\n               Reference: Ruppert, Sheather & Wand (1995) An",
-        " effective bandwidth selector for local least squares regression.",
-        "\n                 Journal of the American Statistical Association,",
-        " 90(432), 1257-1270.",
-        "\n               Note: Uses both x (quantile regressor) and y",
-        " (outcome). Minimises regression MISE -- most appropriate for QQR.",
-        "\n               n = ", n_fin,
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 7. np full cross-validation  (h = "npcv")
-  ##    Uses np::npregbw(xdat=x, ydat=y, regtype="ll")
-  ##    Minimises the least-squares cross-validation criterion:
-  ##      h_CV = argmin_h (1/n) sum_t [y_t - m_hat_{-t}(x_t; h)]^2
-  ##    where m_hat_{-t} is the leave-one-out local-linear fit.
-  ##    Supports mixed continuous and categorical data via generalised
-  ##    product kernels (Li & Racine 2004).
-  ##    Sources: Hayfield & Racine (2008, JSS 27(5), 1-32)
-  ##             Li & Racine (2004, Econometrica 72, 1723-1762)
-  ## ------------------------------------------------------------------
-  if (method == "npcv") {
-    if (is.null(y))
-      stop("method = 'npcv' requires the outcome vector y.")
-
-    if (!requireNamespace("np", quietly = TRUE))
-      stop("method = 'npcv' requires the 'np' package. ",
-           "Install it with: install.packages('np')")
-
-    x_fin <- x[is.finite(x) & is.finite(y)]
-    y_fin <- y[is.finite(x) & is.finite(y)]
-
-    h <- tryCatch({
-      npregbw_fn <- get("npregbw", envir = asNamespace("np"))
-      bw_obj <- npregbw_fn(xdat = x_fin, ydat = y_fin, regtype = "ll")
-      bw_obj$bw
-    }, error = function(e) {
-      warning("npcv (npregbw) bandwidth selection failed (",
-              conditionMessage(e),
-              "). Falling back to Silverman rule.")
-      1.06 * s * n^(-0.2)
-    })
-
-    if (!is.finite(h) || h <= 0) {
-      warning("npregbw returned a non-positive bandwidth. ",
-              "Falling back to Silverman rule.")
-      h <- 1.06 * s * n^(-0.2)
-    }
-
-    return(list(
-      h       = h,
-      method  = "npcv",
-      details = paste0(
-        "np full LS cross-validation  [np::npregbw(xdat, ydat, regtype='ll')]",
-        "\n               References:",
-        "\n                 Hayfield & Racine (2008) Nonparametric econometrics:",
-        " The np package. J. Statistical Software, 27(5), 1-32.",
-        "\n                 Li & Racine (2004) Cross-validated local linear",
-        " nonparametric regression. Econometrica, 72(6), 1723-1762.",
-        "\n               Note: Minimises LOO least-squares loss using",
-        " generalised product kernels for mixed-type data.",
-        "\n               n = ", length(x_fin),
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  ## ------------------------------------------------------------------
-  ## 8. np smooth-coefficient cross-validation  (h = "sc")
-  ##    Uses np::npscoefbw(xdat=x, ydat=y)
-  ##    Selects bandwidth for a smooth varying-coefficient model:
-  ##      Y_i = W_i' gamma(Z_i) + u_i
-  ##    where gamma(Z_i) varies smoothly with the conditioning variable.
-  ##    This is the closest structural analogue to QQR in least-squares
-  ##    form: QQR estimates beta(tau, z_i), i.e. a coefficient that
-  ##    varies with z_i -- the same structure as a varying-coefficient
-  ##    model, but within a quantile rather than mean regression.
-  ##    Sources: Li, Racine & Wooldridge (2002, JASA 97, 1129-1139)
-  ##             Li & Racine (2010, Econometric Theory 26, 1-31)
-  ##             Hayfield & Racine (2008, JSS 27(5), 1-32)
-  ## ------------------------------------------------------------------
-  if (method == "sc") {
-    if (is.null(y))
-      stop("method = 'sc' requires the outcome vector y.")
-
-    if (!requireNamespace("np", quietly = TRUE))
-      stop("method = 'sc' requires the 'np' package. ",
-           "Install it with: install.packages('np')")
-
-    x_fin <- x[is.finite(x) & is.finite(y)]
-    y_fin <- y[is.finite(x) & is.finite(y)]
-
-    h <- tryCatch({
-      npscoefbw_fn <- get("npscoefbw", envir = asNamespace("np"))
-      bw_obj <- npscoefbw_fn(xdat = x_fin, ydat = y_fin)
-      bw_obj$bw
-    }, error = function(e) {
-      warning("sc (npscoefbw) bandwidth selection failed (",
-              conditionMessage(e),
-              "). Falling back to Silverman rule.")
-      1.06 * s * n^(-0.2)
-    })
-
-    ## npscoefbw may return a vector (one bw per variable); take the mean
-    if (length(h) > 1L) h <- mean(h, na.rm = TRUE)
-
-    if (!is.finite(h) || h <= 0) {
-      warning("npscoefbw returned a non-positive bandwidth. ",
-              "Falling back to Silverman rule.")
-      h <- 1.06 * s * n^(-0.2)
-    }
-
-    return(list(
-      h       = h,
-      method  = "sc",
-      details = paste0(
-        "np smooth-coefficient CV  [np::npscoefbw(xdat, ydat)]",
-        "\n               References:",
-        "\n                 Li, Racine & Wooldridge (2002) Semiparametric",
-        " estimation of partially linear models for dependent data with",
-        " generated regressors. Econometrica 70(5), 2123-2163.",
-        "\n                 Li & Racine (2010) Smooth varying-coefficient",
-        " estimation and inference for qualitative and quantitative data.",
-        "\n                 Econometric Theory, 26(6), 1-31.",
-        "\n                 Hayfield & Racine (2008) J. Statistical Software",
-        " 27(5), 1-32.",
-        "\n               Note: Bandwidth for Y_i = W_i' gamma(Z_i) + u_i --",
-        " closest structural analogue to QQR in least-squares form.",
-        "\n               n = ", length(x_fin),
-        ",  h = ", round(h, 6L)
-      )
-    ))
-  }
-
-  stop(
-    "Unknown h method: '", method, "'. ",
-    "Use one of: 'silverman', 'robust', 'iqr', 'cv_fast', ",
-    "'sj', 'yj', 'npcv', 'sc', or a positive number."
-  )
-}
-
-
-## =========================================================================
-## Main fitting function
+## Main fitting function qqr() and the local estimation helpers.
 ## =========================================================================
 
 #' Quantile-on-Quantile Regression
 #'
 #' @description
-#' Fits a quantile-on-quantile regression (QQR) model by running a sequence
-#' of local linear quantile regressions of a dependent variable on a
-#' selected quantile regressor and optional control variables. The local
-#' regressions are evaluated at a grid of locations of the quantile
-#' regressor and at a set of conditional quantile levels \eqn{\tau},
-#' producing a full coefficient surface indexed by both dimensions.
+#' Fits a quantile-on-quantile regression (QQR) model (Sim and Zhou, 2015)
+#' by running a sequence of kernel-weighted local linear quantile
+#' regressions of a dependent variable \eqn{Y} on a designated quantile
+#' regressor \eqn{X} and optional control variables \eqn{W}. The local
+#' regressions are evaluated at a grid of locations of \eqn{X} (by default
+#' its empirical \eqn{\theta}-quantiles) and at a set of conditional
+#' quantile levels \eqn{\tau}, producing coefficient and p-value surfaces
+#' indexed by \eqn{(\theta, \tau)}.
 #'
 #' @details
-#' For each grid point \eqn{z_0} in the support of the quantile regressor
-#' \eqn{X}, the function constructs a locally weighted sample using a
-#' kernel centred at \eqn{z_0} and fits a weighted quantile regression of
-#' the form
-#' \deqn{
-#'   Y = \beta_0(z_0, \tau) + \beta_1(z_0, \tau)(X - z_0)
-#'       + \gamma(z_0, \tau)^\top W + u,
-#' }
-#' for each \eqn{\tau} in \code{taus}, where \eqn{W} denotes the optional
-#' control variables. This produces a surface of coefficients indexed by
-#' grid location and quantile level. P-values are obtained from
-#' \code{\link[quantreg]{summary.rq}} using the chosen standard error type.
+#' \strong{Estimator.}
+#' For each grid location \eqn{x^\theta} and each \eqn{\tau} in
+#' \code{taus}, \code{qqr()} solves the weighted check-loss problem
+#' \deqn{\min_{\alpha, \beta, \gamma} \sum_{t=1}^{n}
+#'   \rho_\tau\{Y_t - \alpha - \beta (X_t - x^\theta) - \gamma^\top W_t\}
+#'   \, K(d_t / h),}
+#' where \eqn{\rho_\tau(u) = u\{\tau - I(u < 0)\}} and \eqn{K} is the
+#' Gaussian kernel. The local slope \eqn{\hat\beta(\theta, \tau)} is the
+#' QQR estimate of the effect of the \eqn{\theta}-quantile of \eqn{X} on
+#' the \eqn{\tau}-quantile of \eqn{Y}; \eqn{\hat\alpha(\theta, \tau)} is
+#' the local intercept (the fitted \eqn{\tau}-quantile of \eqn{Y} at
+#' \eqn{X = x^\theta} and \eqn{W = 0}); and \eqn{\hat\gamma(\theta, \tau)}
+#' are local control coefficients. Each problem is solved with
+#' \code{\link[quantreg]{rq}} (Barrodale-Roberts simplex).
 #'
-#' \strong{Bandwidth selection.}
-#' The bandwidth \code{h} governs the width of the kernel around each grid
-#' point and is the most important tuning parameter in QQR. To promote
-#' reproducibility and discourage post-hoc specification searching, the
-#' default is \code{h = "silverman"}, which computes the bandwidth
-#' automatically from the data. Eight automatic methods are available.
-#' The first three require no additional packages; the next three
-#' (\code{"sj"} and \code{"yj"}) use only recommended packages that ship
-#' with standard R; the last two (\code{"npcv"} and \code{"sc"}) require
-#' the \pkg{np} package.
+#' \strong{Grid (\code{grid}).}
+#' With \code{grid = "quantile"} (the default) the grid points are the
+#' empirical quantiles \eqn{x^\theta = \hat Q_X(\theta)} at
+#' \code{thetas} (by default \code{m} equally spaced levels from 0.05 to
+#' 0.95), as in Sim and Zhou (2015). With \code{grid = "range"} the grid is
+#' \code{m} equally spaced values between \code{min(X)} and \code{max(X)};
+#' this was the only behaviour of \pkg{qqr} 0.2.0 and earlier. In both cases
+#' the stored \code{thetas} are the quantile levels of the grid points
+#' (for \code{"range"}, the empirical CDF evaluated at the grid).
 #'
+#' \strong{Kernel distance (\code{kernel_space}).}
+#' With \code{kernel_space = "x"} (default) the kernel distance is
+#' \eqn{d_t = X_t - x^\theta}, i.e. the bandwidth is measured in the units
+#' of \eqn{X}, as in local linear quantile regression (Yu and Jones,
+#' 1998). With \code{kernel_space = "cdf"} the distance is
+#' \eqn{d_t = F_n(X_t) - \theta}, where \eqn{F_n} is the empirical CDF of
+#' \eqn{X}, exactly as in Sim and Zhou (2015); the bandwidth is then on the
+#' probability scale (Sim and Zhou use \eqn{h = 0.05}) and automatic
+#' selectors are applied to the ranks \eqn{F_n(X_t)}.
+#'
+#' \strong{Bandwidth (\code{h}).}
+#' Either a single positive number (a reproducibility warning is issued) or
+#' one of the automatic rules: \code{"silverman"} (default),
+#' \code{"robust"}, \code{"iqr"}, \code{"cv_fast"}, \code{"sj"},
+#' \code{"yj"}, \code{"npcv"} or \code{"sc"}. The rules are density- or
+#' mean-regression bandwidths applied to the smoothing variable; they are
+#' transparent, reproducible defaults rather than optimal bandwidths for
+#' the QQR surface itself. \code{"yj"} needs \pkg{KernSmooth};
+#' \code{"npcv"} and \code{"sc"} need \pkg{np}. See the methodology
+#' vignette for formulas and references.
+#'
+#' \strong{Inference.}
+#' P-values are those reported by \code{\link[quantreg]{summary.rq}} for
+#' the weighted local problem with \code{se = se_type}. They are pointwise
+#' and do not account for bandwidth selection, smoothing bias or the
+#' multiplicity of grid cells; treat them as descriptive. Use
+#' \code{se_type = "none"} to skip them (faster). With
+#' \code{se_type = "boot"} results depend on the random number generator;
+#' call \code{set.seed()} first.
+#'
+#' \strong{Formula support.}
+#' Controls may be numeric or factors (factors are expanded with
+#' treatment contrasts, so their surfaces are named after the dummy
+#' columns, e.g. \code{"regionB"}). The quantile regressor must be numeric
+#' and must enter the formula as a main effect only (it may be
+#' transformed, e.g. \code{qvar = "log(x)"}, but must not appear in an
+#' interaction).
+#'
+#' @param formula A model formula such as \code{y ~ x} or
+#'   \code{y ~ x + w1 + w2}.
+#' @param data A data frame containing the variables in \code{formula}.
+#' @param qvar Character string naming the quantile regressor exactly as it
+#'   appears in the formula (e.g. \code{"x"} or \code{"log(x)"}). May be
+#'   omitted when the formula has a single regressor.
+#' @param taus Strictly increasing numeric vector of conditional quantile
+#'   levels in \eqn{(0, 1)}. Default \code{seq(0.05, 0.95, by = 0.05)}.
+#' @param m Integer \eqn{\ge 2}; number of grid points. Ignored when
+#'   \code{thetas} is supplied. Default \code{19}.
+#' @param h Bandwidth: a single positive number or the name of an automatic
+#'   rule (see Details). Default \code{"silverman"}.
+#' @param kernel Kernel function. Only \code{"gaussian"} is implemented.
+#' @param se_type Standard-error type passed to
+#'   \code{\link[quantreg]{summary.rq}}: \code{"nid"} (default),
+#'   \code{"ker"}, \code{"boot"} or \code{"none"}.
+#' @param ... Further arguments passed to \code{\link[quantreg]{summary.rq}}
+#'   (for example \code{R} when \code{se_type = "boot"}).
+#' @param na.action Function for handling missing values. Default
+#'   \code{stats::na.omit}.
+#' @param grid Either \code{"quantile"} (default; grid at empirical
+#'   quantiles of the quantile regressor) or \code{"range"} (equally spaced
+#'   over its range, the behaviour of \pkg{qqr} 0.2.0).
+#' @param thetas Optional strictly increasing vector of quantile levels in
+#'   \eqn{(0, 1)} for the grid when \code{grid = "quantile"}. Defaults to
+#'   \code{seq(0.05, 0.95, length.out = m)}.
+#' @param kernel_space Either \code{"x"} (default; kernel on
+#'   \eqn{X_t - x^\theta}) or \code{"cdf"} (kernel on
+#'   \eqn{F_n(X_t) - \theta}, as in Sim and Zhou, 2015).
+#'
+#' @return An object of class \code{"qqr"}: a list with components
 #' \describe{
-#'   \item{\code{"silverman"}}{
-#'     \strong{Silverman's rule of thumb.}
-#'     \eqn{h = 1.06 \cdot \hat\sigma_x \cdot n^{-1/5}}.
-#'     Optimal under normality. Fast, requires only the sample standard
-#'     deviation, and is widely reported in the QQR literature.
-#'     \emph{Silverman (1986), Density Estimation for Statistics and
-#'     Data Analysis, Chapman & Hall.}}
-#'   \item{\code{"robust"}}{
-#'     \strong{Robust rule of thumb.}
-#'     \eqn{h = 0.9 \cdot \min(\hat\sigma_x,\, \widehat{IQR}_x/1.34)
-#'     \cdot n^{-1/5}}.
-#'     The IQR correction protects against heavy tails and outliers.
-#'     Preferred for financial returns, exchange rates, commodity prices,
-#'     and other macroeconomic series.
-#'     \emph{Silverman (1986); Scott (1992), Multivariate Density
-#'     Estimation, Wiley.}}
-#'   \item{\code{"iqr"}}{
-#'     \strong{IQR-based rule.}
-#'     \eqn{h = \widehat{IQR}_x \cdot n^{-1/5}}.
-#'     Appropriate when the spread of the quantile regressor is better
-#'     characterised by its interquartile range.}
-#'   \item{\code{"cv_fast"}}{
-#'     \strong{Fast leave-one-out cross-validation.}
-#'     Minimises the LOO quantile check-loss at \eqn{\tau = 0.5} over a
-#'     15-point grid spanning
-#'     \eqn{[0.5\,h_{\rm Silverman},\, 2\,h_{\rm Silverman}]}.
-#'     No additional packages required. Computationally heavier than the
-#'     rule-of-thumb methods but fully data-driven.
-#'     \emph{Yu and Jones (1998), JASA 93(441), 228-237.}}
-#'   \item{\code{"sj"}}{
-#'     \strong{Sheather-Jones solve-the-equation plug-in.}
-#'     Uses \code{base::bw.SJ(x)} to solve iteratively for
-#'     \eqn{h = [R(K) / (n\,\hat\psi_4(g(h)))]^{1/5}},
-#'     where \eqn{\hat\psi_4} is a pilot estimate of
-#'     \eqn{\int [f''(x)]^2\,dx} and \eqn{g(h)} is a pilot bandwidth.
-#'     Widely regarded as the best density-based selector available.
-#'     No additional packages required.
-#'     \emph{Sheather and Jones (1991), JRSS-B 53(3), 683-690.}}
-#'   \item{\code{"yj"}}{
-#'     \strong{Ruppert-Sheather-Wand direct plug-in for local regression.}
-#'     Uses \code{KernSmooth::dpill(x, y)} to minimise the MISE of a
-#'     local linear regression of \eqn{Y} on \eqn{X}:
-#'     \eqn{h = [\hat\sigma^2_\varepsilon \int K^2 /
-#'     (n\,\hat f_X\,[m''(x)]^2\,\mu_2^2)]^{1/5}}.
-#'     The only selector here that uses both \eqn{X} and \eqn{Y} and is
-#'     tuned to regression loss, making it the most structurally
-#'     appropriate for QQR. Requires \pkg{KernSmooth} (a recommended
-#'     package that ships with standard R).
-#'     \emph{Ruppert, Sheather and Wand (1995), JASA 90(432), 1257-1270.}}
-#'   \item{\code{"npcv"}}{
-#'     \strong{np full least-squares cross-validation.}
-#'     Uses \code{np::npregbw(xdat, ydat, regtype = "ll")} to minimise
-#'     the LOO squared-error loss via generalised product kernels
-#'     (supports mixed continuous and categorical data).
-#'     The most assumption-free selector; computationally heaviest.
-#'     Requires the \pkg{np} package (listed in \code{Suggests}).
-#'     \emph{Hayfield and Racine (2008), J. Statistical Software
-#'     27(5), 1-32.}}
-#'   \item{\code{"sc"}}{
-#'     \strong{np smooth-coefficient cross-validation.}
-#'     Uses \code{np::npscoefbw(xdat, ydat)} to select bandwidth for
-#'     the varying-coefficient model
-#'     \eqn{Y_i = W_i^\top \gamma(Z_i) + u_i},
-#'     which is the closest structural analogue to QQR in least-squares
-#'     form. Requires the \pkg{np} package (listed in \code{Suggests}).
-#'     \emph{Li and Racine (2010), Econometric Theory 26, 1-31;
-#'     Hayfield and Racine (2008), JSS 27(5), 1-32.}}
+#'   \item{\code{call}}{The matched call.}
+#'   \item{\code{formula}}{The model formula.}
+#'   \item{\code{dependent}, \code{independent}}{Names of \eqn{Y} and of
+#'     the quantile regressor.}
+#'   \item{\code{controls}}{Names of the control coefficients (dummy
+#'     columns for factors).}
+#'   \item{\code{grid}, \code{thetas}}{Grid values of \eqn{X} and their
+#'     quantile levels (length \eqn{m}).}
+#'   \item{\code{taus}}{The conditional quantile levels (length
+#'     \eqn{K}).}
+#'   \item{\code{coef_surfaces}, \code{pval_surfaces}}{Named lists of
+#'     \eqn{m \times K} matrices (rows = grid points, columns = taus), one
+#'     per coefficient.}
+#'   \item{\code{qcoef}}{The slope surface of the quantile regressor.}
+#'   \item{\code{intercept}}{Logical; whether the model has an intercept.}
+#'   \item{\code{coef_names}}{Coefficient names.}
+#'   \item{\code{bandwidth}, \code{h_method}, \code{h_details}}{The
+#'     bandwidth, its selection method and a reporting description.}
+#'   \item{\code{grid_type}, \code{kernel_space}, \code{kernel},
+#'     \code{se_type}}{Estimation settings.}
+#'   \item{\code{effective_n}}{\eqn{m \times K} matrix of Kish effective
+#'     local sample sizes \eqn{(\sum w)^2 / \sum w^2}.}
+#'   \item{\code{n_failed}}{Number of local fits that failed (their cells
+#'     are \code{NA}).}
+#'   \item{\code{n}}{Number of observations used.}
+#'   \item{\code{data}}{The model frame.}
+#'   \item{\code{y}, \code{design}}{Response vector and (uncentred) design
+#'     matrix, used by \code{\link{compare.qqr}}.}
 #' }
 #'
-#' If a positive numeric value is supplied for \code{h}, it is used
-#' directly and a warning is issued reminding the researcher that manual
-#' bandwidth selection may introduce specification bias.
-#'
-#' The selected bandwidth, the method label, and a full description
-#' (including the formula, numerical inputs, and final value) are stored
-#' in the returned object as \code{bandwidth}, \code{h_method}, and
-#' \code{h_details}, and are printed by \code{\link{print.qqr}} and
-#' \code{\link{summary.qqr}}.
-#'
-#' @param formula A model formula of the form \code{y ~ x} or
-#'   \code{y ~ x + controls}, where \code{y} is numeric.
-#' @param data A data frame containing all variables in \code{formula}.
-#' @param qvar Optional character string naming the quantile regressor.
-#'   Must be one of the right-hand side variables. If \code{NULL} and
-#'   the formula contains exactly one regressor, that variable is used.
-#'   An error is raised if there are multiple regressors and \code{qvar}
-#'   is not supplied.
-#' @param taus Numeric vector of conditional quantile levels in \eqn{(0,1)}
-#'   at which the local regressions are evaluated. Default is
-#'   \code{seq(0.05, 0.95, by = 0.05)}.
-#' @param m Positive integer giving the number of equally spaced grid
-#'   points over the observed range of the quantile regressor. Default
-#'   is \code{19}.
-#' @param h Bandwidth for the kernel weighting. Either a character string
-#'   naming an automatic selection method (\code{"silverman"},
-#'   \code{"robust"}, \code{"iqr"}, \code{"cv_fast"}, \code{"sj"},
-#'   \code{"yj"}, \code{"npcv"}, or \code{"sc"}), or a single positive
-#'   numeric value. Default is \code{"silverman"}. See Details.
-#' @param kernel Character string specifying the kernel function. Currently
-#'   only \code{"gaussian"} is supported.
-#' @param se_type Character string selecting the standard error type passed
-#'   to \code{\link[quantreg]{summary.rq}} for p-value computation.
-#'   Options are \code{"nid"} (normal, independent design; default),
-#'   \code{"ker"} (kernel), \code{"boot"} (bootstrap), or \code{"none"}
-#'   (skip p-value computation entirely). When p-values cannot be computed
-#'   at a grid-tau combination, the corresponding entry is set to \code{NA}.
-#' @param na.action Function for handling missing values in the model
-#'   frame. Default is \code{stats::na.omit}.
-#' @param ... Additional arguments forwarded to
-#'   \code{\link[quantreg]{summary.rq}} when \code{se_type = "boot"}
-#'   (e.g. \code{R} for the number of bootstrap replications).
-#'
-#' @return
-#' An object of class \code{"qqr"} containing:
-#' \describe{
-#'   \item{\code{call}}{The matched function call.}
-#'   \item{\code{dependent}}{Name of the dependent variable.}
-#'   \item{\code{independent}}{Name of the quantile regressor.}
-#'   \item{\code{controls}}{Character vector of control variable names
-#'     (length zero if none).}
-#'   \item{\code{grid}}{Numeric vector of length \code{m}: the grid of
-#'     quantile-regressor values used for local fitting.}
-#'   \item{\code{taus}}{Numeric vector of quantile levels.}
-#'   \item{\code{coef_surfaces}}{Named list of \eqn{m \times K} matrices,
-#'     one per coefficient (intercept, quantile regressor, controls).}
-#'   \item{\code{pval_surfaces}}{Named list of \eqn{m \times K} p-value
-#'     matrices with the same structure.}
-#'   \item{\code{qcoef}}{The \eqn{m \times K} coefficient matrix for the
-#'     quantile regressor.}
-#'   \item{\code{intercept}}{Logical; \code{TRUE} if the formula includes
-#'     an intercept.}
-#'   \item{\code{coef_names}}{Character vector of coefficient names.}
-#'   \item{\code{bandwidth}}{The numeric bandwidth \code{h} used.}
-#'   \item{\code{h_method}}{Character label of the selection method:
-#'     \code{"silverman"}, \code{"robust"}, \code{"iqr"},
-#'     \code{"cv_fast"}, \code{"sj"}, \code{"yj"}, \code{"npcv"},
-#'     \code{"sc"}, or \code{"manual"}.}
-#'   \item{\code{h_details}}{Full description of how \code{h} was
-#'     selected, including the formula, numerical inputs, and references,
-#'     suitable for inclusion in a paper's methods section.}
-#'   \item{\code{kernel}}{Kernel name.}
-#'   \item{\code{se_type}}{Standard error type used.}
-#'   \item{\code{effective_n}}{Matrix of effective local sample sizes.}
-#'   \item{\code{n}}{Number of observations used in the fit.}
-#'   \item{\code{data}}{The model frame used for fitting.}
-#' }
-#'
-#' @seealso
-#' \code{\link{summary.qqr}}, \code{\link{print.qqr}},
-#' \code{\link{plot.qqr}}, \code{\link{Int.plot}},
-#' \code{\link{surface3d}}, \code{\link{panel_surface}},
-#' \code{\link{qqr_surface}}, \code{\link{rowave.qqr}},
-#' \code{\link{compare.qqr}}, \code{\link{excel.qqr}},
-#' \code{\link{word.qqr}}
+#' @seealso \code{\link{summary.qqr}}, \code{\link{qqr_surface}},
+#'   \code{\link{compare.qqr}}, \code{\link{surface3d}},
+#'   \code{\link{qqr_heatmap}}, \code{\link{excel.qqr}}
 #'
 #' @references
-#' Hayfield, T. and Racine, J.S. (2008) Nonparametric econometrics: The np
-#' package. \emph{Journal of Statistical Software}, 27(5), 1--32.
+#' Koenker, R. and Bassett, G. (1978) Regression quantiles.
+#' \emph{Econometrica}, 46(1), 33--50. \doi{10.2307/1913643}
 #'
-#' Li, Q. and Racine, J.S. (2010) Smooth varying-coefficient estimation and
-#' inference for qualitative and quantitative data.
-#' \emph{Econometric Theory}, 26(6), 1--31.
+#' Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
+#' dependence between their quantiles. \emph{Journal of Banking & Finance},
+#' 55, 1--8. \doi{10.1016/j.jbankfin.2015.01.013}
 #'
-#' Ruppert, D., Sheather, S.J. and Wand, M.P. (1995) An effective bandwidth
-#' selector for local least squares regression.
-#' \emph{Journal of the American Statistical Association}, 90(432),
-#' 1257--1270.
-#'
-#' Scott, D.W. (1992) \emph{Multivariate Density Estimation: Theory,
-#' Practice, and Visualization}. New York: Wiley.
-#'
-#' Sheather, S.J. and Jones, M.C. (1991) A reliable data-based bandwidth
-#' selection method for kernel density estimation.
-#' \emph{Journal of the Royal Statistical Society Series B}, 53(3),
-#' 683--690.
-#'
-#' Silverman, B.W. (1986) \emph{Density Estimation for Statistics and Data
+#' Silverman, B. W. (1986) \emph{Density Estimation for Statistics and Data
 #' Analysis}. London: Chapman & Hall.
 #'
-#' Sim, N. and Zhou, H. (2015) Oil prices, US stock return and the
-#' dependence between their quantiles.
-#' \emph{Journal of Banking & Finance}, 55, 1--8.
-#'
-#' Yu, K. and Jones, M.C. (1998) Local linear quantile regression.
+#' Yu, K. and Jones, M. C. (1998) Local linear quantile regression.
 #' \emph{Journal of the American Statistical Association}, 93(441),
-#' 228--237.
+#' 228--237. \doi{10.1080/01621459.1998.10474104}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(42)
-#' n   <- 300
+#' n   <- 200
 #' x   <- rnorm(n)
-#' u   <- rnorm(n)
-#' y   <- 0.5 + x * stats::qnorm(stats::runif(n)) + 0.3 * u
-#' dat <- data.frame(y = y, x = x, u = u)
+#' w   <- rnorm(n)
+#' y   <- 0.5 + x + 0.3 * w + (1 + 0.5 * abs(x)) * rnorm(n)
+#' dat <- data.frame(y = y, x = x, w = w)
 #'
-#' ## Default: Silverman rule (no extra packages)
-#' fit1 <- qqr(y ~ x + u, data = dat, qvar = "x",
-#'             taus = seq(0.05, 0.95, by = 0.05), m = 19)
-#' print(fit1)
-#' summary(fit1)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.1, 0.25, 0.5, 0.75, 0.9), m = 5)
+#' fit
+#' summary(fit)
+#' round(fit$qcoef, 2)
 #'
-#' ## Robust rule (heavy-tailed regressors)
-#' fit2 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "robust")
-#'
-#' ## Sheather-Jones plug-in (base R, no extra packages)
-#' fit3 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "sj")
-#'
-#' ## Ruppert-Sheather-Wand plug-in (uses x and y; KernSmooth)
-#' fit4 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "yj")
-#'
-#' ## Fast LOO cross-validation (no extra packages)
-#' fit5 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "cv_fast")
-#'
-#' ## np full LS cross-validation (requires np package)
-#' fit6 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "npcv")
-#'
-#' ## np smooth-coefficient CV (requires np package)
-#' fit7 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "sc")
-#'
-#' ## Manual bandwidth (triggers a reproducibility warning)
-#' fit8 <- qqr(y ~ x + u, data = dat, qvar = "x", h = 0.10)
-#' }
+#' ## Sim and Zhou (2015) weighting on the empirical-CDF scale
+#' fit_sz <- suppressWarnings(
+#'   qqr(y ~ x + w, data = dat, qvar = "x", taus = c(0.25, 0.5, 0.75),
+#'       m = 5, kernel_space = "cdf", h = 0.05)
+#' )
 #'
 #' @export
 qqr <- function(formula,
                 data,
-                qvar      = NULL,
-                taus      = seq(0.05, 0.95, by = 0.05),
-                m         = 19L,
-                h         = "silverman",
-                kernel    = c("gaussian"),
-                se_type   = c("nid", "ker", "boot", "none"),
+                qvar         = NULL,
+                taus         = seq(0.05, 0.95, by = 0.05),
+                m            = 19L,
+                h            = "silverman",
+                kernel       = c("gaussian"),
+                se_type      = c("nid", "ker", "boot", "none"),
                 ...,
-                na.action = stats::na.omit) {
+                na.action    = stats::na.omit,
+                grid         = c("quantile", "range"),
+                thetas       = NULL,
+                kernel_space = c("x", "cdf")) {
 
-  kernel  <- match.arg(kernel)
-  se_type <- match.arg(se_type)
-
-  ## -----------------------------------------------------------------------
-  ## 1. Parse formula and data
-  ## -----------------------------------------------------------------------
-  mf <- stats::model.frame(formula, data = data, na.action = na.action)
-  if (ncol(mf) < 2L)
-    stop("Formula must have at least one independent variable.")
-
-  terms_obj     <- stats::terms(formula)
-  has_intercept <- as.logical(attr(terms_obj, "intercept"))
-
-  dep_name    <- colnames(mf)[1L]
-  indep_names <- colnames(mf)[-1L]
+  cl           <- match.call()
+  kernel       <- match.arg(kernel)
+  se_type      <- match.arg(se_type)
+  grid_type    <- match.arg(grid)
+  kernel_space <- match.arg(kernel_space)
 
   ## -----------------------------------------------------------------------
-  ## 2. Identify quantile regressor
+  ## 1. Validate scalar arguments
   ## -----------------------------------------------------------------------
-  if (length(indep_names) == 1L) {
-    if (is.null(qvar)) {
-      qvar <- indep_names[1L]
-    } else if (!(qvar %in% indep_names)) {
-      stop("qvar '", qvar, "' is not an independent variable in the formula.")
-    }
+  if (!inherits(formula, "formula"))
+    stop("'formula' must be a formula, e.g. y ~ x + w.", call. = FALSE)
+  if (!is.data.frame(data))
+    stop("'data' must be a data frame.", call. = FALSE)
+  if (nrow(data) == 0L)
+    stop("'data' has no rows.", call. = FALSE)
+
+  taus <- .qqr_check_probs(taus, "taus")
+
+  if (is.null(thetas)) {
+    if (!is.numeric(m) || length(m) != 1L || !is.finite(m) || m < 2 ||
+        m != round(m))
+      stop("'m' must be a single whole number >= 2.", call. = FALSE)
+    m <- as.integer(m)
   } else {
-    if (is.null(qvar))
-      stop("Formula has multiple regressors. ",
-           "Set qvar to one of: ",
-           paste(indep_names, collapse = ", "))
-    if (!(qvar %in% indep_names))
-      stop("qvar '", qvar, "' is not an independent variable in the formula.")
+    if (grid_type == "range")
+      stop("'thetas' can only be used with grid = \"quantile\".",
+           call. = FALSE)
+    thetas <- .qqr_check_probs(thetas, "thetas")
+    m      <- length(thetas)
+    if (m < 2L) stop("'thetas' must contain at least two values.",
+                     call. = FALSE)
   }
 
-  control_names <- setdiff(indep_names, qvar)
+  ## -----------------------------------------------------------------------
+  ## 2. Model frame, response and design matrix
+  ## -----------------------------------------------------------------------
+  mf <- stats::model.frame(formula, data = data, na.action = na.action,
+                           drop.unused.levels = TRUE)
+  if (nrow(mf) == 0L)
+    stop("No complete observations remain after handling missing values.",
+         call. = FALSE)
 
-  y        <- mf[[dep_name]]
-  x        <- mf[[qvar]]
-  controls <- if (length(control_names)) mf[control_names] else NULL
+  tt <- attr(mf, "terms")
+  if (attr(tt, "response") != 1L)
+    stop("'formula' must have a response on the left-hand side.",
+         call. = FALSE)
 
-  if (!is.numeric(y) || !is.numeric(x))
-    stop("Both dependent variable and quantile regressor must be numeric.")
-  if (length(y) != length(x))
-    stop("Dependent and quantile regressor have different lengths.")
+  term_labels <- attr(tt, "term.labels")
+  if (length(term_labels) == 0L)
+    stop("Formula must have at least one independent variable.",
+         call. = FALSE)
+
+  dep_name <- names(mf)[1L]
+  y        <- stats::model.response(mf)
+  if (!is.numeric(y) || is.matrix(y))
+    stop("The dependent variable must be numeric (a single numeric ",
+         "column).", call. = FALSE)
+
+  ## Quantile regressor
+  if (is.null(qvar)) {
+    if (length(term_labels) != 1L)
+      stop("Formula has multiple regressors. Set 'qvar' to one of: ",
+           paste(term_labels, collapse = ", "), call. = FALSE)
+    qvar <- term_labels[1L]
+  }
+  if (!is.character(qvar) || length(qvar) != 1L)
+    stop("'qvar' must be a single character string.", call. = FALSE)
+  if (!(qvar %in% term_labels))
+    stop("qvar '", qvar, "' is not an independent variable in the ",
+         "formula. Available: ", paste(term_labels, collapse = ", "),
+         call. = FALSE)
+
+  ## qvar must not appear inside an interaction term
+  fac <- attr(tt, "factors")
+  if (qvar %in% rownames(fac)) {
+    in_terms <- colnames(fac)[fac[qvar, ] > 0]
+    if (length(setdiff(in_terms, qvar)) > 0L)
+      stop("The quantile regressor '", qvar, "' appears in an interaction (",
+           paste(setdiff(in_terms, qvar), collapse = ", "),
+           "). Interactions with the quantile regressor are not supported.",
+           call. = FALSE)
+  }
+
+  x <- mf[[qvar]]
+  if (!is.numeric(x) || is.matrix(x))
+    stop("The quantile regressor '", qvar, "' must be numeric.",
+         call. = FALSE)
+  if (any(!is.finite(x)) || any(!is.finite(y)))
+    stop("The dependent variable and quantile regressor must be finite ",
+         "(no Inf/NaN).", call. = FALSE)
+  if (length(unique(x)) < 3L)
+    stop("The quantile regressor must take at least three distinct values.",
+         call. = FALSE)
+
+  X <- stats::model.matrix(tt, mf)
+  if (!(qvar %in% colnames(X)))
+    stop("Could not locate '", qvar, "' in the design matrix.",
+         call. = FALSE)
+  if (any(!is.finite(X)))
+    stop("The design matrix contains non-finite values.", call. = FALSE)
+
+  has_intercept <- attr(tt, "intercept") == 1L
+  int_col       <- if (has_intercept) "(Intercept)" else character(0L)
+  control_cols  <- setdiff(colnames(X), c(int_col, qvar))
+  coef_names    <- c(int_col, qvar, control_cols)
+  X             <- X[, coef_names, drop = FALSE]
+  n             <- nrow(X)
+  p             <- ncol(X)
+
+  if (n <= p + 1L)
+    stop("Too few observations (", n, ") for ", p, " coefficients.",
+         call. = FALSE)
 
   ## -----------------------------------------------------------------------
-  ## 3. Bandwidth selection
+  ## 3. Grid
   ## -----------------------------------------------------------------------
-  h_spec <- h   ## preserve original user input for storage
+  Fx <- .qqr_ecdf_ranks(x)
+  if (grid_type == "quantile") {
+    if (is.null(thetas)) thetas <- seq(0.05, 0.95, length.out = m)
+    grid_vals <- as.numeric(stats::quantile(x, probs = thetas, type = 7,
+                                            names = FALSE))
+  } else {
+    grid_vals <- seq(min(x), max(x), length.out = m)
+    thetas    <- vapply(grid_vals, function(g) mean(x <= g), numeric(1L))
+  }
 
-  ## Methods that require y to be passed explicitly
-  y_methods <- c("yj", "npcv", "sc")
-
+  ## -----------------------------------------------------------------------
+  ## 4. Bandwidth
+  ## -----------------------------------------------------------------------
+  s_var <- if (kernel_space == "x") x else Fx
   if (is.character(h)) {
-
-    h_result <- .qqr_select_h(
-      x       = x,
-      y       = if (h %in% y_methods) y else NULL,
-      method  = h,
-      taus    = taus,
-      m       = m,
-      kernel  = kernel,
-      se_type = se_type
+    if (length(h) != 1L || !(h %in% .qqr_h_methods()))
+      stop("h must be a positive number or one of: ",
+           paste(sprintf("'%s'", .qqr_h_methods()), collapse = ", "),
+           ". Got: ", deparse(h), call. = FALSE)
+    hr <- .qqr_select_h(
+      x      = s_var,
+      y      = if (h %in% .qqr_h_needs_y()) y else NULL,
+      method = h,
+      kernel = kernel
     )
-    h         <- h_result$h
-    h_method  <- h_result$method
-    h_details <- h_result$details
-
+    h_val     <- hr$h
+    h_method  <- hr$method
+    h_details <- hr$details
+    if (kernel_space == "cdf")
+      h_details <- paste0(h_details,
+                          " [applied to the empirical-CDF ranks of ", qvar,
+                          "]")
   } else if (is.numeric(h) && length(h) == 1L && is.finite(h) && h > 0) {
-
+    h_val     <- h
     h_method  <- "manual"
-    h_details <- paste0(
-      "Manually specified  [h = ", h, "]",
-      "\n               WARNING: Manual bandwidth selection may ",
-      "introduce specification bias.",
-      "\n               For reproducible research, consider h = ",
-      "'silverman', 'robust', 'iqr', 'cv_fast', 'sj', 'yj', 'npcv', or 'sc'."
-    )
-
-    warning(
-      "Bandwidth h was set manually to ", h, ". ",
-      "Manual bandwidth selection may affect results and reduce ",
-      "reproducibility. ",
-      "For automatic selection, use h = 'silverman' (default), 'robust', ",
-      "'iqr', 'cv_fast', 'sj', 'yj', 'npcv', or 'sc'.",
-      call. = FALSE
-    )
-
+    h_details <- paste0("Manually specified h = ", format(h),
+                        if (kernel_space == "cdf")
+                          " (probability scale)" else "")
+    warning("Bandwidth h was set manually to ", format(h), ". ",
+            "Manual bandwidth choices affect the results; report them and ",
+            "check sensitivity. Automatic rules: ",
+            paste(.qqr_h_methods(), collapse = ", "), ".", call. = FALSE)
   } else {
-    stop(
-      "h must be a positive number or one of: ",
-      "'silverman', 'robust', 'iqr', 'cv_fast', 'sj', 'yj', 'npcv', 'sc'. ",
-      "Got: ", deparse(h_spec)
-    )
+    stop("h must be a single positive number or one of: ",
+         paste(sprintf("'%s'", .qqr_h_methods()), collapse = ", "),
+         ". Got: ", deparse(h), call. = FALSE)
   }
+  if (kernel_space == "cdf" && h_val >= 1)
+    warning("With kernel_space = \"cdf\" the bandwidth is on the ",
+            "probability scale; h = ", format(h_val), " >= 1 gives almost ",
+            "uniform weights.", call. = FALSE)
 
   ## -----------------------------------------------------------------------
-  ## 4. Build grid
+  ## 5. Local fits
   ## -----------------------------------------------------------------------
-  grid <- seq(min(x, na.rm = TRUE),
-              max(x, na.rm = TRUE),
-              length.out = m)
+  K <- length(taus)
+  empty <- function() matrix(NA_real_, nrow = m, ncol = K)
+  coef_surfaces <- stats::setNames(replicate(p, empty(), simplify = FALSE),
+                                   coef_names)
+  pval_surfaces <- stats::setNames(replicate(p, empty(), simplify = FALSE),
+                                   coef_names)
+  effective_n <- empty()
 
-  ## -----------------------------------------------------------------------
-  ## 5. Coefficient names
-  ## -----------------------------------------------------------------------
-  coef_names <- c(
-    if (has_intercept) "(Intercept)" else NULL,
-    qvar,
-    control_names
-  )
+  n_failed  <- 0L
+  n_nonuniq <- 0L
+  q_col     <- match(qvar, coef_names)
 
-  n_coef <- length(coef_names)
-  n_grid <- length(grid)
-  n_tau  <- length(taus)
+  for (i in seq_len(m)) {
+    d <- if (kernel_space == "x") x - grid_vals[i] else Fx - thetas[i]
+    w <- .qqr_kernel(d / h_val, kernel)
+    ess <- .qqr_kish(w)
+    effective_n[i, ] <- ess
 
-  ## -----------------------------------------------------------------------
-  ## 6. Initialise surface storage
-  ## -----------------------------------------------------------------------
-  coef_surfaces <- stats::setNames(
-    lapply(seq_len(n_coef), function(i)
-      matrix(NA_real_, nrow = n_grid, ncol = n_tau)),
-    coef_names
-  )
+    Xc <- X
+    Xc[, q_col] <- x - grid_vals[i]
 
-  pval_surfaces <- stats::setNames(
-    lapply(seq_len(n_coef), function(i)
-      matrix(NA_real_, nrow = n_grid, ncol = n_tau)),
-    coef_names
-  )
-
-  effective_n <- matrix(NA_real_, nrow = n_grid, ncol = n_tau)
-
-  ## -----------------------------------------------------------------------
-  ## 7. Fit local quantile regressions
-  ## -----------------------------------------------------------------------
-  for (j in seq_along(taus)) {
-    tau_j <- taus[j]
-
-    for (i in seq_len(n_grid)) {
-      res <- .qqr_lprq_point(
-        y          = y,
-        x          = x,
-        controls   = controls,
-        grid_value = grid[i],
-        h          = h,
-        tau        = tau_j,
-        kernel     = kernel,
-        intercept  = has_intercept,
-        qvar       = qvar,
-        coef_names = coef_names,
-        se_type    = se_type,
-        ...
-      )
-
-      if (is.null(res)) next
-
-      for (k in seq_len(n_coef)) {
+    for (j in seq_len(K)) {
+      res <- .qqr_local_fit(y, Xc, w, taus[j], se_type, ...)
+      n_nonuniq <- n_nonuniq + res$nonunique
+      if (is.null(res$coef)) {
+        n_failed <- n_failed + 1L
+        next
+      }
+      for (k in seq_len(p)) {
         coef_surfaces[[k]][i, j] <- res$coef[k]
         pval_surfaces[[k]][i, j] <- res$pval[k]
       }
-      effective_n[i, j] <- res$effective_n
     }
   }
 
-  ## -----------------------------------------------------------------------
-  ## 8. Assemble and return
-  ## -----------------------------------------------------------------------
+  if (n_failed > 0L)
+    warning(n_failed, " of ", m * K, " local quantile regressions could not ",
+            "be estimated (too little local information, e.g. a small ",
+            "bandwidth or collinear controls). The corresponding cells are ",
+            "NA.", call. = FALSE)
+  if (n_nonuniq > 0L && n_nonuniq == m * K)
+    message("Note: quantreg reported non-unique solutions in all local ",
+            "fits; this is common with discrete data and is usually harmless.")
+
+  if (se_type != "none") {
+    n_pna <- sum(is.na(pval_surfaces[[q_col]]) &
+                   !is.na(coef_surfaces[[q_col]]))
+    if (n_pna > 0L)
+      warning("P-values could not be computed for ", n_pna, " of ", m * K,
+              " cells of '", qvar, "' (they are NA).", call. = FALSE)
+  }
+
   structure(
     list(
-      call          = match.call(),
+      call          = cl,
+      formula       = formula,
       dependent     = dep_name,
       independent   = qvar,
-      controls      = control_names,
-      grid          = grid,
+      controls      = control_cols,
+      grid          = grid_vals,
+      thetas        = thetas,
       taus          = taus,
       coef_surfaces = coef_surfaces,
       pval_surfaces = pval_surfaces,
       qcoef         = coef_surfaces[[qvar]],
       intercept     = has_intercept,
       coef_names    = coef_names,
-      bandwidth     = h,
+      bandwidth     = h_val,
       h_method      = h_method,
       h_details     = h_details,
+      grid_type     = grid_type,
+      kernel_space  = kernel_space,
       kernel        = kernel,
       se_type       = se_type,
       effective_n   = effective_n,
-      n             = nrow(mf),
-      data          = mf
+      n_failed      = n_failed,
+      n             = n,
+      data          = mf,
+      y             = as.numeric(y),
+      design        = X
     ),
     class = "qqr"
   )
@@ -860,106 +456,150 @@ qqr <- function(formula,
 ## Internal helpers
 ## =========================================================================
 
-## -------------------------------------------------------------------------
-## Map user-facing coefficient name to internal storage key
-## @keywords internal
-## -------------------------------------------------------------------------
-.qqr_match_coef <- function(x, coef) {
-  coef_names <- names(x$coef_surfaces)
-
-  if (coef %in% coef_names) return(coef)
-
-  if (tolower(coef) %in% c("intercept", "(intercept)")) {
-    if ("(Intercept)" %in% coef_names) return("(Intercept)")
-  }
-
-  if (coef == x$independent) {
-    if (x$independent %in% coef_names) return(x$independent)
-    if ("z" %in% coef_names)           return("z")   ## backwards compat
-  }
-
-  available <- c(
-    if ("(Intercept)" %in% coef_names) "intercept" else NULL,
-    x$independent,
-    x$controls
-  )
-  stop("Coefficient '", coef, "' not recognised. Available: ",
-       paste(available, collapse = ", "))
+## Validate a vector of probabilities.
+## @noRd
+.qqr_check_probs <- function(v, name) {
+  if (!is.numeric(v) || length(v) == 0L || any(!is.finite(v)))
+    stop("'", name, "' must be a non-empty numeric vector without missing ",
+         "values.", call. = FALSE)
+  if (any(v <= 0 | v >= 1))
+    stop("All '", name, "' must lie strictly between 0 and 1.",
+         call. = FALSE)
+  if (length(v) > 1L && any(diff(v) <= 0))
+    stop("'", name, "' must be strictly increasing (sorted, no duplicates).",
+         call. = FALSE)
+  as.numeric(v)
 }
 
+## Empirical CDF ranks F_n(X_t) = #{s : X_s <= X_t} / n.
+## @noRd
+.qqr_ecdf_ranks <- function(x) {
+  stats::ecdf(x)(x)
+}
 
-## -------------------------------------------------------------------------
-## One local kernel-weighted quantile regression
-## @keywords internal
-## -------------------------------------------------------------------------
-.qqr_lprq_point <- function(y, x, controls, grid_value, h, tau,
-                             kernel     = c("gaussian"),
-                             intercept  = TRUE,
-                             qvar,
-                             coef_names,
-                             se_type    = c("nid", "ker", "boot", "none"),
-                             ...) {
+## Kernel function.
+## @noRd
+.qqr_kernel <- function(u, kernel = "gaussian") {
+  switch(kernel,
+         gaussian = stats::dnorm(u),
+         stop("Unsupported kernel '", kernel, "'.", call. = FALSE))
+}
 
-  kernel  <- match.arg(kernel)
-  se_type <- match.arg(se_type)
+## Kish effective sample size (sum w)^2 / sum w^2.
+## @noRd
+.qqr_kish <- function(w) {
+  sw2 <- sum(w^2)
+  if (!is.finite(sw2) || sw2 <= 0) return(0)
+  sum(w)^2 / sw2
+}
 
-  z  <- x - grid_value
-  wx <- switch(kernel,
-               gaussian = stats::dnorm(z / h))
+## One weighted local quantile regression.
+## y: response; X: local (centred) design including intercept column;
+## w: kernel weights. Returns list(coef, pval, nonunique) with coef = NULL
+## on failure.
+## @noRd
+.qqr_local_fit <- function(y, X, w, tau, se_type, ...) {
+  p    <- ncol(X)
+  keep <- w > 0
+  fail <- list(coef = NULL, pval = NULL, nonunique = 0L)
+  if (sum(keep) <= p || .qqr_kish(w) < p + 1)
+    return(fail)
 
-  effective_n <- sum(wx[is.finite(wx)], na.rm = TRUE)
+  Xk <- X[keep, , drop = FALSE]
+  wk <- w[keep]
+  if (qr(Xk * sqrt(wk))$rank < p)
+    return(fail)
 
-  na_result <- function() {
-    v <- stats::setNames(rep(NA_real_, length(coef_names)), coef_names)
-    list(effective_n = effective_n, coef = v, pval = v)
-  }
+  ## Safe column names so that any variable name (e.g. "log(x)" or factor
+  ## dummies) can be used inside the model formula.
+  vn <- paste0("v", seq_len(p))
+  df <- as.data.frame(Xk)
+  names(df) <- vn
+  df$.y <- y[keep]
+  df$.w <- wk
+  form <- stats::as.formula(paste(".y ~ 0 +", paste(vn, collapse = " + ")))
 
-  if (!any(is.finite(wx)) || effective_n < .Machine$double.eps)
-    return(na_result())
-
-  ## Build local design frame
-  if (is.null(controls) || ncol(controls) == 0L) {
-    df_fit         <- data.frame(y = y)
-    df_fit[[qvar]] <- z
-    rhs            <- qvar
-  } else {
-    df_fit         <- data.frame(y = y)
-    df_fit[[qvar]] <- z
-    df_fit         <- cbind(df_fit, controls)
-    rhs            <- paste(c(qvar, names(controls)), collapse = " + ")
-  }
-
-  form <- stats::as.formula(
-    paste("y ~", if (!intercept) "0 +" else "", rhs)
-  )
-
+  nonunique <- 0L
   fit <- tryCatch(
-    quantreg::rq(form, data = df_fit, weights = wx, tau = tau, ci = FALSE),
+    withCallingHandlers(
+      quantreg::rq(form, data = df, weights = .w, tau = tau, method = "br"),
+      warning = function(wn) {
+        if (grepl("nonunique", conditionMessage(wn))) {
+          nonunique <<- 1L
+          invokeRestart("muffleWarning")
+        }
+      }
+    ),
     error = function(e) NULL
   )
+  if (is.null(fit) || length(fit$coefficients) != p ||
+      any(!is.finite(fit$coefficients)))
+    return(fail)
 
-  if (is.null(fit)) return(na_result())
-
-  ## Coefficients
-  cf      <- stats::coef(fit)
-  cf_full <- stats::setNames(rep(NA_real_, length(coef_names)), coef_names)
-  cf_full[names(cf)] <- cf
-
-  ## P-values
-  pv_full <- stats::setNames(rep(NA_real_, length(coef_names)), coef_names)
+  cf   <- as.numeric(fit$coefficients[vn])
+  pval <- rep(NA_real_, p)
 
   if (!identical(se_type, "none")) {
-    summ <- tryCatch(
-      quantreg::summary.rq(fit, se = se_type, ...),
+    sm <- tryCatch(
+      suppressWarnings(quantreg::summary.rq(fit, se = se_type, ...)),
       error = function(e) NULL
     )
-    if (!is.null(summ) && !is.null(summ$coefficients)) {
-      cm   <- summ$coefficients
+    if (!is.null(sm) && !is.null(sm$coefficients)) {
+      cm   <- sm$coefficients
       pcol <- grep("^Pr\\(", colnames(cm))
-      if (length(pcol) >= 1L)
-        pv_full[rownames(cm)] <- cm[, pcol[1L]]
+      if (length(pcol) == 1L && all(vn %in% rownames(cm)))
+        pval <- as.numeric(cm[vn, pcol])
     }
   }
 
-  list(effective_n = effective_n, coef = cf_full, pval = pv_full)
+  list(coef = cf, pval = pval, nonunique = nonunique)
+}
+
+## Map a user-facing coefficient name to the stored surface name.
+## Accepts "intercept"/"(Intercept)" (case-insensitive) for the intercept.
+## @noRd
+.qqr_match_coef <- function(x, coef) {
+  if (!is.character(coef) || length(coef) != 1L || is.na(coef))
+    stop("'coef' must be a single character string.", call. = FALSE)
+  all_names <- names(x$coef_surfaces)
+  if (coef %in% all_names) return(coef)
+  if (tolower(coef) %in% c("intercept", "(intercept)") &&
+      "(Intercept)" %in% all_names)
+    return("(Intercept)")
+  if (identical(coef, x$independent) && "z" %in% all_names)
+    return("z")   ## objects created by qqr <= 0.1
+  stop("Coefficient '", coef, "' not recognised. Available: ",
+       paste(.qqr_user_coefs(x), collapse = ", "), call. = FALSE)
+}
+
+## User-facing coefficient names.
+## @noRd
+.qqr_user_coefs <- function(x) {
+  vapply(names(x$coef_surfaces), function(nm) {
+    if (nm == "z") x$independent else nm
+  }, character(1L), USE.NAMES = FALSE)
+}
+
+## Quantile levels of the grid points, also for objects fitted with
+## qqr 0.2.0 (which did not store them).
+## @noRd
+.qqr_thetas <- function(x) {
+  if (!is.null(x$thetas)) return(x$thetas)
+  xv <- x$data[[x$independent]]
+  if (is.null(xv)) return(seq(0.05, 0.95, length.out = length(x$grid)))
+  vapply(x$grid, function(g) mean(xv <= g), numeric(1L))
+}
+
+## Surface matrix for a coefficient.
+## @noRd
+.qqr_get_surface <- function(x, coef, what = c("coef", "pvalue")) {
+  what <- match.arg(what)
+  nm   <- .qqr_match_coef(x, coef)
+  mat  <- if (what == "coef") x$coef_surfaces[[nm]] else x$pval_surfaces[[nm]]
+  if (is.null(mat))
+    stop("No ", what, " surface stored for '", coef, "'.", call. = FALSE)
+  if (what == "pvalue" && all(is.na(mat)))
+    stop("The p-value surface for '", coef, "' is empty. Re-fit with ",
+         "se_type other than \"none\".", call. = FALSE)
+  mat
 }

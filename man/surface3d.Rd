@@ -131,36 +131,14 @@ is fixed across multiple plots for direct comparability -- the same
 convention used in the MATLAB workflow.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-z1  <- rnorm(n)
-y   <- 0.5 + x * qnorm(runif(n)) + 0.3 * z1
-dat <- data.frame(y = y, x = x, z1 = z1)
-
-fit <- qqr(y ~ x + z1, data = dat, qvar = "x",
-           taus = seq(0.05, 0.95, by = 0.05), m = 19)
-
-# Plot coefficient surface for the quantile regressor
-surface3d(fit, coef = "x")
-
-# Plot with fixed colour limits and zero plane
-surface3d(fit, coef = "x",
-          clim           = c(-2, 2),
-          add_zero_plane = TRUE,
-          palette        = "RdBu",
-          theta          = 45,
-          phi            = 30)
-
-# Plot p-value surface
-surface3d(fit, coef = "x", what = "pvalue",
-          clim    = c(0, 1),
-          palette = "YlGnBu")
-
-# Plot control variable surface
-surface3d(fit, coef = "z1", palette = "plasma")
-}
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+surface3d(fit)
+surface3d(fit, palette = "RdBu", add_zero_plane = TRUE, theta = 40)
+surface3d(fit, what = "pvalue", clim = c(0, 1), palette = "YlGnBu")
 
 }
 \seealso{

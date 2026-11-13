@@ -147,42 +147,18 @@ The concept of contour visualisation for QQR surfaces is adapted from
 Roudane (2026); the implementation has been substantially extended.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-y   <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat,
-           taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-
-## Basic filled contour with bold zero contour
-qqr_contour(fit)
-
-## More contour levels for finer resolution
-qqr_contour(fit, n_levels = 20L)
-
-## Grey out non-significant regions (p > 0.05)
-qqr_contour(fit, sig_mask = TRUE, sig_threshold = 0.05)
-
-## Fixed colour limits for comparing two models
-qqr_contour(fit, clim = c(-1.5, 1.5))
-
-## P-value contour -- shows where the effect is significant
-qqr_contour(fit, what = "pvalue", palette = "YlOrRd",
-            center_zero = FALSE, zero_contour = FALSE)
-
-## Suppress inline labels for a cleaner figure
-qqr_contour(fit, show_labels = FALSE)
-
-## Save as self-contained HTML
-p <- qqr_contour(fit, sig_mask = TRUE)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("plotly", quietly = TRUE)) {
+  qqr_contour(fit)
+  qqr_contour(fit, sig_mask = TRUE, sig_threshold = 0.05)
+}
+\dontrun{
+p <- qqr_contour(fit)
 htmlwidgets::saveWidget(p, "contour.html", selfcontained = TRUE)
-
-## Save as PNG (requires kaleido)
-## Install once: reticulate::py_install("kaleido")
-qqr_contour(fit, snapshot = TRUE, snapshot_file = "contour.png")
 }
 
 }

@@ -43,18 +43,14 @@
 #' \code{\link[openxlsx]{writeData}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n  <- 200
-#' x  <- rnorm(n)
-#' y  <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat, m = 15)
-#'
-#' # Export both coefficients and p-values
-#' excel.qqr(fit, file = "All_QQR_results.xlsx",
-#'           which = "both", digits = 4)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("openxlsx", quietly = TRUE)) {
+#'   f <- excel.qqr(fit, file = tempfile(fileext = ".xlsx"), digits = 4)
+#'   openxlsx::getSheetNames(f)
 #' }
 #'
 #' @export
@@ -207,31 +203,15 @@ excel.qqr <- function(x,
 #' \code{\link[officer]{read_docx}}, \code{\link[flextable]{flextable}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n  <- 200
-#' x  <- rnorm(n)
-#' y  <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat, m = 15)
-#'
-#' # Export coefficients and p-values for the quantile regressor,
-#' # including grid values
-#' word.qqr(fit,
-#'          file              = "QQR_x_coef_pval.docx",
-#'          coef              = "x",
-#'          which             = "both",
-#'          digits            = 4,
-#'          include_grid_value = TRUE)
-#'
-#' # Export a compact version without the Grid_Value column
-#' word.qqr(fit,
-#'          file              = "QQR_x_coef_pval_compact.docx",
-#'          coef              = "x",
-#'          which             = "both",
-#'          digits            = 4,
-#'          include_grid_value = FALSE)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("officer", quietly = TRUE) &&
+#'     requireNamespace("flextable", quietly = TRUE)) {
+#'   word.qqr(fit, file = tempfile(fileext = ".docx"), coef = "x",
+#'            which = "coef_stars", digits = 3)
 #' }
 #'
 #' @export
@@ -269,7 +249,7 @@ word.qqr <- function(x,
   # -----------------------------
   make_stars <- function(pval) {
     sig <- ifelse(
-      is.na(pval), "\u2020",
+      is.na(pval), " [NA]",
       ifelse(pval < 0.01, "***",
              ifelse(pval < 0.05,  "**",
                     ifelse(pval < 0.10,  "*",
@@ -316,11 +296,14 @@ word.qqr <- function(x,
     for(j in seq_len(ncol(coef_sub))){
       coef_vec <- coef_sub[,j]
       pval_vec <- pval_sub[,j]
-      if(!is.null(digits)){
-        coef_vec <- round(coef_vec,digits)
+      coef_txt <- if (!is.null(digits)) {
+        formatC(coef_vec, format = "f", digits = digits)
+      } else {
+        format(coef_vec, digits = 6L, trim = TRUE)
       }
+      coef_txt[is.na(coef_vec)] <- "NA"
       stars <- make_stars(pval_vec)
-      out[,j] <- paste0(coef_vec,stars)
+      out[,j] <- paste0(coef_txt,stars)
     }
     df <- as.data.frame(out)
     colnames(df) <- paste0("tau_",x$taus)
@@ -399,7 +382,12 @@ word.qqr <- function(x,
     # Significance note
     doc <- officer::body_add_par(
       doc,
-      "Notes: Entries report quantile-on-quantile regression coefficients. Significance stars denote p-values obtained from local quantile regressions: *** p<0.01, ** p<0.05, * p<0.10. \u2020 indicates that p-values could not be computed at the corresponding grid-quantile combination.",
+      paste0("Notes: Entries report quantile-on-quantile regression ",
+             "coefficients. Significance stars denote pointwise p-values ",
+             "from the local quantile regressions (se = '", x$se_type,
+             "'): *** p<0.01, ** p<0.05, * p<0.10. [NA] indicates that ",
+             "the p-value could not be computed at that grid-quantile ",
+             "combination."),
       style="Normal"
     )
   }

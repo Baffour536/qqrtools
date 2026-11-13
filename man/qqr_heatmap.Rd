@@ -176,47 +176,20 @@ with significance overlays, symmetric zero-centred scaling, multi-coefficient
 subplots, and a corrected axis convention.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-z1  <- rnorm(n)
-y   <- x * qnorm(runif(n)) + 0.3 * z1
-dat <- data.frame(y = y, x = x, z1 = z1)
-
-fit <- qqr(y ~ x + z1, data = dat, qvar = "x",
-           taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-
-## Basic heatmap -- focal regressor, RdBu palette centred at zero
-qqr_heatmap(fit)
-
-## Stars overlay: cells significant at 1 \%, 5 \%, and 10 \% are labelled
-qqr_heatmap(fit, sig_overlay = "stars")
-
-## Dots overlay: any significant cell gets a bullet (white text on dark bg)
-qqr_heatmap(fit, sig_overlay = "dots", sig_colour = "white",
-            palette = "Viridis")
-
-## P-value surface with sequential palette, no zero-centering
-qqr_heatmap(fit, what = "pvalue", palette = "YlOrRd",
-            center_zero = FALSE)
-
-## All coefficients in a subplot grid, shared colour scale
-qqr_heatmap(fit, coef = "all", palette = "RdBu",
-            sig_overlay = "stars")
-
-## Fix colour limits for comparing two models side-by-side
-qqr_heatmap(fit, clim = c(-1.5, 1.5))
-
-## Grid index on x-axis instead of actual z_i values
-qqr_heatmap(fit, grid_values = FALSE)
-
-## Save as self-contained interactive HTML
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("plotly", quietly = TRUE)) {
+  qqr_heatmap(fit)
+  qqr_heatmap(fit, sig_overlay = "stars")
+  qqr_heatmap(fit, coef = "all")
+}
+\dontrun{
 p <- qqr_heatmap(fit, sig_overlay = "stars")
 htmlwidgets::saveWidget(p, "heatmap.html", selfcontained = TRUE)
-
-## Save as static PNG (requires kaleido)
-## Install once: reticulate::py_install("kaleido")
+## Static PNG (requires the Python 'kaleido' package)
 qqr_heatmap(fit, snapshot = TRUE, snapshot_file = "heatmap.png")
 }
 

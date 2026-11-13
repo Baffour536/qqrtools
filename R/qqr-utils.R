@@ -20,10 +20,11 @@
 #' @param grid_subset Optional integer vector of grid indices to keep.
 #'   If \code{NULL} (the default), all grid points are used. Values
 #'   outside the valid range are truncated to the nearest valid index.
-#' @param tau_subset Optional subset of quantile levels. This can be
-#'   either a numeric vector of indices into \code{x$taus} or a numeric
-#'   vector of quantile values to be matched to \code{x$taus}. If
-#'   \code{NULL}, all quantile levels are used.
+#' @param tau_subset Optional subset of quantile levels: either integer
+#'   indices into \code{x$taus} (values \eqn{\ge 1}) or quantile values in
+#'   \eqn{(0, 1)} that are matched to \code{x$taus} (with a tolerance of
+#'   \code{1e-8}; unmatched values give an error). If \code{NULL}, all
+#'   quantile levels are used.
 #' @param include_grid_value Logical flag indicating whether to include a
 #'   column containing the actual grid values (the locations of the
 #'   quantile regressor) in addition to the grid index.
@@ -69,25 +70,15 @@
 #' \code{\link{excel.qqr}}, \code{\link{word.qqr}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n  <- 200
-#' x  <- rnorm(n)
-#' y  <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat, m = 15)
-#'
-#' # Wide matrix for the quantile regressor coefficient
-#' surf_q <- qqr_surface(fit, coef = "x", what = "coef",
-#'                       long = FALSE, digits = 4)
-#' head(surf_q)
-#'
-#' # Long tidy table for all coefficients and all quantiles
-#' surf_all <- qqr_surface(fit, coef = "all", what = "coef",
-#'                         long = TRUE, digits = 4)
-#' head(surf_all)
-#' }
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' ## Wide table: one row per grid point, one column per tau
+#' qqr_surface(fit, coef = "x", digits = 3)
+#' ## Long (tidy) table for all coefficients
+#' head(qqr_surface(fit, coef = "all", long = TRUE))
 #'
 #' @export
 qqr_surface <- function(x,
@@ -143,13 +134,22 @@ qqr_surface <- function(x,
   if (is.null(tau_subset)) {
     idx_tau <- seq_len(n_tau)
   } else {
-    # If user passes actual tau values, convert to indices
-    if (is.numeric(tau_subset) && !all(tau_subset %in% seq_len(n_tau))) {
-      idx_tau <- match(tau_subset, x$taus)
+    if (!is.numeric(tau_subset) || anyNA(tau_subset))
+      stop("'tau_subset' must be numeric indices or tau values.",
+           call. = FALSE)
+    if (all(tau_subset < 1)) {
+      # tau values: match to x$taus with a floating-point tolerance
+      idx_tau <- vapply(tau_subset, function(tv) {
+        hit <- which(abs(x$taus - tv) < 1e-8)
+        if (length(hit) == 0L) NA_integer_ else hit[1L]
+      }, integer(1L))
+      if (anyNA(idx_tau))
+        stop("tau value(s) not in the fit: ",
+             paste(tau_subset[is.na(idx_tau)], collapse = ", "),
+             ". Available: ", paste(x$taus, collapse = ", "), call. = FALSE)
     } else {
       idx_tau <- as.integer(tau_subset)
     }
-    idx_tau <- idx_tau[!is.na(idx_tau)]
     idx_tau <- unique(pmax(1L, pmin(n_tau, idx_tau)))
   }
   taus_sub <- x$taus[idx_tau]
@@ -192,45 +192,24 @@ qqr_surface <- function(x,
   }
 
   # Case 2: multiple coefficients, or long == TRUE: build tidy long table
-  if (!requireNamespace("tidyr", quietly = TRUE)) {
-    stop("Package 'tidyr' is required for long = TRUE or multiple coefficients.")
-  }
-
+  # in base R; one row per coefficient x grid point x tau, ordered by
+  # coefficient, then grid point, then tau.
   pieces <- lapply(coef_internal, function(nm) {
     mat <- extract_one(nm)
-    df  <- as.data.frame(mat)
-    df$Grid_Point <- idx_grid
-    if (include_grid_value) {
-      df$Grid_Value <- x$grid[idx_grid]
-    }
-    coef_label <- make_label(nm)
-    df$Coefficient <- coef_label
-
-    # Arrange columns so that tau columns are together
-    base_cols <- c("Coefficient", "Grid_Point")
-    if (include_grid_value) base_cols <- c(base_cols, "Grid_Value")
-    df <- df[, c(base_cols, tau_cols)]
-
+    df <- data.frame(
+      Coefficient = make_label(nm),
+      Grid_Point  = rep(idx_grid, each = length(idx_tau)),
+      stringsAsFactors = FALSE
+    )
+    if (include_grid_value)
+      df$Grid_Value <- rep(x$grid[idx_grid], each = length(idx_tau))
+    df$tau   <- rep(taus_sub, times = length(idx_grid))
+    df$value <- as.vector(t(mat))
     df
   })
 
-  big <- do.call(rbind, pieces)
-
-  # Pivot to long: one row per (Coefficient, Grid, tau)
-  long_df <- tidyr::pivot_longer(
-    big,
-    cols      = dplyr::all_of(tau_cols),
-    names_to  = "tau_label",
-    values_to = "value"
-  )
-  long_df$tau <- as.numeric(sub("^tau_", "", long_df$tau_label))
-
-  # Drop tau_label, keep a clean structure
-  long_df <- long_df[, c("Coefficient",
-                         "Grid_Point",
-                         if (include_grid_value) "Grid_Value" else NULL,
-                         "tau",
-                         "value")]
+  long_df <- do.call(rbind, pieces)
+  rownames(long_df) <- NULL
 
   # Optional rounding for display only
   if (!is.null(digits) && digits >= 0) {
@@ -310,22 +289,13 @@ qqr_surface <- function(x,
 #' \code{\link{qqr}}, \code{\link{qqr_surface}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n  <- 200
-#' x  <- rnorm(n)
-#' y  <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat, m = 15)
-#'
-#' # Row means for the quantile regressor, including grid values
-#' row_x <- rowave.qqr(fit, coef = "x", digits = 4)
-#'
-#' # Row means for all coefficients, with grid_value suppressed
-#' row_all <- rowave.qqr(fit, coef = "all", digits = 4,
-#'                       include_grid_value = FALSE)
-#' }
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' rowave.qqr(fit, coef = "x", digits = 3)
+#' rowave.qqr(fit, coef = "all", include_grid_value = FALSE)
 #'
 #' @export
 rowave.qqr <- function(x,

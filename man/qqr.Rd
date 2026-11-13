@@ -14,275 +14,200 @@ qqr(
   kernel = c("gaussian"),
   se_type = c("nid", "ker", "boot", "none"),
   ...,
-  na.action = stats::na.omit
+  na.action = stats::na.omit,
+  grid = c("quantile", "range"),
+  thetas = NULL,
+  kernel_space = c("x", "cdf")
 )
 }
 \arguments{
-\item{formula}{A model formula of the form \code{y ~ x} or
-\code{y ~ x + controls}, where \code{y} is numeric.}
+\item{formula}{A model formula such as \code{y ~ x} or
+\code{y ~ x + w1 + w2}.}
 
-\item{data}{A data frame containing all variables in \code{formula}.}
+\item{data}{A data frame containing the variables in \code{formula}.}
 
-\item{qvar}{Optional character string naming the quantile regressor.
-Must be one of the right-hand side variables. If \code{NULL} and
-the formula contains exactly one regressor, that variable is used.
-An error is raised if there are multiple regressors and \code{qvar}
-is not supplied.}
+\item{qvar}{Character string naming the quantile regressor exactly as it
+appears in the formula (e.g. \code{"x"} or \code{"log(x)"}). May be
+omitted when the formula has a single regressor.}
 
-\item{taus}{Numeric vector of conditional quantile levels in \eqn{(0,1)}
-at which the local regressions are evaluated. Default is
-\code{seq(0.05, 0.95, by = 0.05)}.}
+\item{taus}{Strictly increasing numeric vector of conditional quantile
+levels in \eqn{(0, 1)}. Default \code{seq(0.05, 0.95, by = 0.05)}.}
 
-\item{m}{Positive integer giving the number of equally spaced grid
-points over the observed range of the quantile regressor. Default
-is \code{19}.}
+\item{m}{Integer \eqn{\ge 2}; number of grid points. Ignored when
+\code{thetas} is supplied. Default \code{19}.}
 
-\item{h}{Bandwidth for the kernel weighting. Either a character string
-naming an automatic selection method (\code{"silverman"},
-\code{"robust"}, \code{"iqr"}, \code{"cv_fast"}, \code{"sj"},
-\code{"yj"}, \code{"npcv"}, or \code{"sc"}), or a single positive
-numeric value. Default is \code{"silverman"}. See Details.}
+\item{h}{Bandwidth: a single positive number or the name of an automatic
+rule (see Details). Default \code{"silverman"}.}
 
-\item{kernel}{Character string specifying the kernel function. Currently
-only \code{"gaussian"} is supported.}
+\item{kernel}{Kernel function. Only \code{"gaussian"} is implemented.}
 
-\item{se_type}{Character string selecting the standard error type passed
-to \code{\link[quantreg]{summary.rq}} for p-value computation.
-Options are \code{"nid"} (normal, independent design; default),
-\code{"ker"} (kernel), \code{"boot"} (bootstrap), or \code{"none"}
-(skip p-value computation entirely). When p-values cannot be computed
-at a grid-tau combination, the corresponding entry is set to \code{NA}.}
+\item{se_type}{Standard-error type passed to
+\code{\link[quantreg]{summary.rq}}: \code{"nid"} (default),
+\code{"ker"}, \code{"boot"} or \code{"none"}.}
 
-\item{...}{Additional arguments forwarded to
-\code{\link[quantreg]{summary.rq}} when \code{se_type = "boot"}
-(e.g. \code{R} for the number of bootstrap replications).}
+\item{...}{Further arguments passed to \code{\link[quantreg]{summary.rq}}
+(for example \code{R} when \code{se_type = "boot"}).}
 
-\item{na.action}{Function for handling missing values in the model
-frame. Default is \code{stats::na.omit}.}
+\item{na.action}{Function for handling missing values. Default
+\code{stats::na.omit}.}
+
+\item{grid}{Either \code{"quantile"} (default; grid at empirical
+quantiles of the quantile regressor) or \code{"range"} (equally spaced
+over its range, the behaviour of \pkg{qqr} 0.2.0).}
+
+\item{thetas}{Optional strictly increasing vector of quantile levels in
+\eqn{(0, 1)} for the grid when \code{grid = "quantile"}. Defaults to
+\code{seq(0.05, 0.95, length.out = m)}.}
+
+\item{kernel_space}{Either \code{"x"} (default; kernel on
+\eqn{X_t - x^\theta}) or \code{"cdf"} (kernel on
+\eqn{F_n(X_t) - \theta}, as in Sim and Zhou, 2015).}
 }
 \value{
-An object of class \code{"qqr"} containing:
+An object of class \code{"qqr"}: a list with components
 \describe{
-\item{\code{call}}{The matched function call.}
-\item{\code{dependent}}{Name of the dependent variable.}
-\item{\code{independent}}{Name of the quantile regressor.}
-\item{\code{controls}}{Character vector of control variable names
-(length zero if none).}
-\item{\code{grid}}{Numeric vector of length \code{m}: the grid of
-quantile-regressor values used for local fitting.}
-\item{\code{taus}}{Numeric vector of quantile levels.}
-\item{\code{coef_surfaces}}{Named list of \eqn{m \times K} matrices,
-one per coefficient (intercept, quantile regressor, controls).}
-\item{\code{pval_surfaces}}{Named list of \eqn{m \times K} p-value
-matrices with the same structure.}
-\item{\code{qcoef}}{The \eqn{m \times K} coefficient matrix for the
-quantile regressor.}
-\item{\code{intercept}}{Logical; \code{TRUE} if the formula includes
-an intercept.}
-\item{\code{coef_names}}{Character vector of coefficient names.}
-\item{\code{bandwidth}}{The numeric bandwidth \code{h} used.}
-\item{\code{h_method}}{Character label of the selection method:
-\code{"silverman"}, \code{"robust"}, \code{"iqr"},
-\code{"cv_fast"}, \code{"sj"}, \code{"yj"}, \code{"npcv"},
-\code{"sc"}, or \code{"manual"}.}
-\item{\code{h_details}}{Full description of how \code{h} was
-selected, including the formula, numerical inputs, and references,
-suitable for inclusion in a paper's methods section.}
-\item{\code{kernel}}{Kernel name.}
-\item{\code{se_type}}{Standard error type used.}
-\item{\code{effective_n}}{Matrix of effective local sample sizes.}
-\item{\code{n}}{Number of observations used in the fit.}
-\item{\code{data}}{The model frame used for fitting.}
+\item{\code{call}}{The matched call.}
+\item{\code{formula}}{The model formula.}
+\item{\code{dependent}, \code{independent}}{Names of \eqn{Y} and of
+the quantile regressor.}
+\item{\code{controls}}{Names of the control coefficients (dummy
+columns for factors).}
+\item{\code{grid}, \code{thetas}}{Grid values of \eqn{X} and their
+quantile levels (length \eqn{m}).}
+\item{\code{taus}}{The conditional quantile levels (length
+\eqn{K}).}
+\item{\code{coef_surfaces}, \code{pval_surfaces}}{Named lists of
+\eqn{m \times K} matrices (rows = grid points, columns = taus), one
+per coefficient.}
+\item{\code{qcoef}}{The slope surface of the quantile regressor.}
+\item{\code{intercept}}{Logical; whether the model has an intercept.}
+\item{\code{coef_names}}{Coefficient names.}
+\item{\code{bandwidth}, \code{h_method}, \code{h_details}}{The
+bandwidth, its selection method and a reporting description.}
+\item{\code{grid_type}, \code{kernel_space}, \code{kernel},
+\code{se_type}}{Estimation settings.}
+\item{\code{effective_n}}{\eqn{m \times K} matrix of Kish effective
+local sample sizes \eqn{(\sum w)^2 / \sum w^2}.}
+\item{\code{n_failed}}{Number of local fits that failed (their cells
+are \code{NA}).}
+\item{\code{n}}{Number of observations used.}
+\item{\code{data}}{The model frame.}
+\item{\code{y}, \code{design}}{Response vector and (uncentred) design
+matrix, used by \code{\link{compare.qqr}}.}
 }
 }
 \description{
-Fits a quantile-on-quantile regression (QQR) model by running a sequence
-of local linear quantile regressions of a dependent variable on a
-selected quantile regressor and optional control variables. The local
-regressions are evaluated at a grid of locations of the quantile
-regressor and at a set of conditional quantile levels \eqn{\tau},
-producing a full coefficient surface indexed by both dimensions.
+Fits a quantile-on-quantile regression (QQR) model (Sim and Zhou, 2015)
+by running a sequence of kernel-weighted local linear quantile
+regressions of a dependent variable \eqn{Y} on a designated quantile
+regressor \eqn{X} and optional control variables \eqn{W}. The local
+regressions are evaluated at a grid of locations of \eqn{X} (by default
+its empirical \eqn{\theta}-quantiles) and at a set of conditional
+quantile levels \eqn{\tau}, producing coefficient and p-value surfaces
+indexed by \eqn{(\theta, \tau)}.
 }
 \details{
-For each grid point \eqn{z_0} in the support of the quantile regressor
-\eqn{X}, the function constructs a locally weighted sample using a
-kernel centred at \eqn{z_0} and fits a weighted quantile regression of
-the form
-\deqn{
-  Y = \beta_0(z_0, \tau) + \beta_1(z_0, \tau)(X - z_0)
-      + \gamma(z_0, \tau)^\top W + u,
-}
-for each \eqn{\tau} in \code{taus}, where \eqn{W} denotes the optional
-control variables. This produces a surface of coefficients indexed by
-grid location and quantile level. P-values are obtained from
-\code{\link[quantreg]{summary.rq}} using the chosen standard error type.
+\strong{Estimator.}
+For each grid location \eqn{x^\theta} and each \eqn{\tau} in
+\code{taus}, \code{qqr()} solves the weighted check-loss problem
+\deqn{\min_{\alpha, \beta, \gamma} \sum_{t=1}^{n}
+  \rho_\tau\{Y_t - \alpha - \beta (X_t - x^\theta) - \gamma^\top W_t\}
+  \, K(d_t / h),}
+where \eqn{\rho_\tau(u) = u\{\tau - I(u < 0)\}} and \eqn{K} is the
+Gaussian kernel. The local slope \eqn{\hat\beta(\theta, \tau)} is the
+QQR estimate of the effect of the \eqn{\theta}-quantile of \eqn{X} on
+the \eqn{\tau}-quantile of \eqn{Y}; \eqn{\hat\alpha(\theta, \tau)} is
+the local intercept (the fitted \eqn{\tau}-quantile of \eqn{Y} at
+\eqn{X = x^\theta} and \eqn{W = 0}); and \eqn{\hat\gamma(\theta, \tau)}
+are local control coefficients. Each problem is solved with
+\code{\link[quantreg]{rq}} (Barrodale-Roberts simplex).
 
-\strong{Bandwidth selection.}
-The bandwidth \code{h} governs the width of the kernel around each grid
-point and is the most important tuning parameter in QQR. To promote
-reproducibility and discourage post-hoc specification searching, the
-default is \code{h = "silverman"}, which computes the bandwidth
-automatically from the data. Eight automatic methods are available.
-The first three require no additional packages; the next three
-(\code{"sj"} and \code{"yj"}) use only recommended packages that ship
-with standard R; the last two (\code{"npcv"} and \code{"sc"}) require
-the \pkg{np} package.
+\strong{Grid (\code{grid}).}
+With \code{grid = "quantile"} (the default) the grid points are the
+empirical quantiles \eqn{x^\theta = \hat Q_X(\theta)} at
+\code{thetas} (by default \code{m} equally spaced levels from 0.05 to
+0.95), as in Sim and Zhou (2015). With \code{grid = "range"} the grid is
+\code{m} equally spaced values between \code{min(X)} and \code{max(X)};
+this was the only behaviour of \pkg{qqr} 0.2.0 and earlier. In both cases
+the stored \code{thetas} are the quantile levels of the grid points
+(for \code{"range"}, the empirical CDF evaluated at the grid).
 
-\describe{
-\item{\code{"silverman"}}{
-\strong{Silverman's rule of thumb.}
-\eqn{h = 1.06 \cdot \hat\sigma_x \cdot n^{-1/5}}.
-Optimal under normality. Fast, requires only the sample standard
-deviation, and is widely reported in the QQR literature.
-\emph{Silverman (1986), Density Estimation for Statistics and
-Data Analysis, Chapman & Hall.}}
-\item{\code{"robust"}}{
-\strong{Robust rule of thumb.}
-\eqn{h = 0.9 \cdot \min(\hat\sigma_x,\, \widehat{IQR}_x/1.34)
-    \cdot n^{-1/5}}.
-The IQR correction protects against heavy tails and outliers.
-Preferred for financial returns, exchange rates, commodity prices,
-and other macroeconomic series.
-\emph{Silverman (1986); Scott (1992), Multivariate Density
-Estimation, Wiley.}}
-\item{\code{"iqr"}}{
-\strong{IQR-based rule.}
-\eqn{h = \widehat{IQR}_x \cdot n^{-1/5}}.
-Appropriate when the spread of the quantile regressor is better
-characterised by its interquartile range.}
-\item{\code{"cv_fast"}}{
-\strong{Fast leave-one-out cross-validation.}
-Minimises the LOO quantile check-loss at \eqn{\tau = 0.5} over a
-15-point grid spanning
-\eqn{[0.5\,h_{\rm Silverman},\, 2\,h_{\rm Silverman}]}.
-No additional packages required. Computationally heavier than the
-rule-of-thumb methods but fully data-driven.
-\emph{Yu and Jones (1998), JASA 93(441), 228-237.}}
-\item{\code{"sj"}}{
-\strong{Sheather-Jones solve-the-equation plug-in.}
-Uses \code{base::bw.SJ(x)} to solve iteratively for
-\eqn{h = [R(K) / (n\,\hat\psi_4(g(h)))]^{1/5}},
-where \eqn{\hat\psi_4} is a pilot estimate of
-\eqn{\int [f''(x)]^2\,dx} and \eqn{g(h)} is a pilot bandwidth.
-Widely regarded as the best density-based selector available.
-No additional packages required.
-\emph{Sheather and Jones (1991), JRSS-B 53(3), 683-690.}}
-\item{\code{"yj"}}{
-\strong{Ruppert-Sheather-Wand direct plug-in for local regression.}
-Uses \code{KernSmooth::dpill(x, y)} to minimise the MISE of a
-local linear regression of \eqn{Y} on \eqn{X}:
-\eqn{h = [\hat\sigma^2_\varepsilon \int K^2 /
-    (n\,\hat f_X\,[m''(x)]^2\,\mu_2^2)]^{1/5}}.
-The only selector here that uses both \eqn{X} and \eqn{Y} and is
-tuned to regression loss, making it the most structurally
-appropriate for QQR. Requires \pkg{KernSmooth} (a recommended
-package that ships with standard R).
-\emph{Ruppert, Sheather and Wand (1995), JASA 90(432), 1257-1270.}}
-\item{\code{"npcv"}}{
-\strong{np full least-squares cross-validation.}
-Uses \code{np::npregbw(xdat, ydat, regtype = "ll")} to minimise
-the LOO squared-error loss via generalised product kernels
-(supports mixed continuous and categorical data).
-The most assumption-free selector; computationally heaviest.
-Requires the \pkg{np} package (listed in \code{Suggests}).
-\emph{Hayfield and Racine (2008), J. Statistical Software
-27(5), 1-32.}}
-\item{\code{"sc"}}{
-\strong{np smooth-coefficient cross-validation.}
-Uses \code{np::npscoefbw(xdat, ydat)} to select bandwidth for
-the varying-coefficient model
-\eqn{Y_i = W_i^\top \gamma(Z_i) + u_i},
-which is the closest structural analogue to QQR in least-squares
-form. Requires the \pkg{np} package (listed in \code{Suggests}).
-\emph{Li and Racine (2010), Econometric Theory 26, 1-31;
-Hayfield and Racine (2008), JSS 27(5), 1-32.}}
-}
+\strong{Kernel distance (\code{kernel_space}).}
+With \code{kernel_space = "x"} (default) the kernel distance is
+\eqn{d_t = X_t - x^\theta}, i.e. the bandwidth is measured in the units
+of \eqn{X}, as in local linear quantile regression (Yu and Jones,
+1998). With \code{kernel_space = "cdf"} the distance is
+\eqn{d_t = F_n(X_t) - \theta}, where \eqn{F_n} is the empirical CDF of
+\eqn{X}, exactly as in Sim and Zhou (2015); the bandwidth is then on the
+probability scale (Sim and Zhou use \eqn{h = 0.05}) and automatic
+selectors are applied to the ranks \eqn{F_n(X_t)}.
 
-If a positive numeric value is supplied for \code{h}, it is used
-directly and a warning is issued reminding the researcher that manual
-bandwidth selection may introduce specification bias.
+\strong{Bandwidth (\code{h}).}
+Either a single positive number (a reproducibility warning is issued) or
+one of the automatic rules: \code{"silverman"} (default),
+\code{"robust"}, \code{"iqr"}, \code{"cv_fast"}, \code{"sj"},
+\code{"yj"}, \code{"npcv"} or \code{"sc"}. The rules are density- or
+mean-regression bandwidths applied to the smoothing variable; they are
+transparent, reproducible defaults rather than optimal bandwidths for
+the QQR surface itself. \code{"yj"} needs \pkg{KernSmooth};
+\code{"npcv"} and \code{"sc"} need \pkg{np}. See the methodology
+vignette for formulas and references.
 
-The selected bandwidth, the method label, and a full description
-(including the formula, numerical inputs, and final value) are stored
-in the returned object as \code{bandwidth}, \code{h_method}, and
-\code{h_details}, and are printed by \code{\link{print.qqr}} and
-\code{\link{summary.qqr}}.
+\strong{Inference.}
+P-values are those reported by \code{\link[quantreg]{summary.rq}} for
+the weighted local problem with \code{se = se_type}. They are pointwise
+and do not account for bandwidth selection, smoothing bias or the
+multiplicity of grid cells; treat them as descriptive. Use
+\code{se_type = "none"} to skip them (faster). With
+\code{se_type = "boot"} results depend on the random number generator;
+call \code{set.seed()} first.
+
+\strong{Formula support.}
+Controls may be numeric or factors (factors are expanded with
+treatment contrasts, so their surfaces are named after the dummy
+columns, e.g. \code{"regionB"}). The quantile regressor must be numeric
+and must enter the formula as a main effect only (it may be
+transformed, e.g. \code{qvar = "log(x)"}, but must not appear in an
+interaction).
 }
 \examples{
-\dontrun{
 set.seed(42)
-n   <- 300
+n   <- 200
 x   <- rnorm(n)
-u   <- rnorm(n)
-y   <- 0.5 + x * stats::qnorm(stats::runif(n)) + 0.3 * u
-dat <- data.frame(y = y, x = x, u = u)
+w   <- rnorm(n)
+y   <- 0.5 + x + 0.3 * w + (1 + 0.5 * abs(x)) * rnorm(n)
+dat <- data.frame(y = y, x = x, w = w)
 
-## Default: Silverman rule (no extra packages)
-fit1 <- qqr(y ~ x + u, data = dat, qvar = "x",
-            taus = seq(0.05, 0.95, by = 0.05), m = 19)
-print(fit1)
-summary(fit1)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.1, 0.25, 0.5, 0.75, 0.9), m = 5)
+fit
+summary(fit)
+round(fit$qcoef, 2)
 
-## Robust rule (heavy-tailed regressors)
-fit2 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "robust")
-
-## Sheather-Jones plug-in (base R, no extra packages)
-fit3 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "sj")
-
-## Ruppert-Sheather-Wand plug-in (uses x and y; KernSmooth)
-fit4 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "yj")
-
-## Fast LOO cross-validation (no extra packages)
-fit5 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "cv_fast")
-
-## np full LS cross-validation (requires np package)
-fit6 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "npcv")
-
-## np smooth-coefficient CV (requires np package)
-fit7 <- qqr(y ~ x + u, data = dat, qvar = "x", h = "sc")
-
-## Manual bandwidth (triggers a reproducibility warning)
-fit8 <- qqr(y ~ x + u, data = dat, qvar = "x", h = 0.10)
-}
+## Sim and Zhou (2015) weighting on the empirical-CDF scale
+fit_sz <- suppressWarnings(
+  qqr(y ~ x + w, data = dat, qvar = "x", taus = c(0.25, 0.5, 0.75),
+      m = 5, kernel_space = "cdf", h = 0.05)
+)
 
 }
 \references{
-Hayfield, T. and Racine, J.S. (2008) Nonparametric econometrics: The np
-package. \emph{Journal of Statistical Software}, 27(5), 1--32.
+Koenker, R. and Bassett, G. (1978) Regression quantiles.
+\emph{Econometrica}, 46(1), 33--50. \doi{10.2307/1913643}
 
-Li, Q. and Racine, J.S. (2010) Smooth varying-coefficient estimation and
-inference for qualitative and quantitative data.
-\emph{Econometric Theory}, 26(6), 1--31.
+Sim, N. and Zhou, H. (2015) Oil prices, US stock return, and the
+dependence between their quantiles. \emph{Journal of Banking & Finance},
+55, 1--8. \doi{10.1016/j.jbankfin.2015.01.013}
 
-Ruppert, D., Sheather, S.J. and Wand, M.P. (1995) An effective bandwidth
-selector for local least squares regression.
-\emph{Journal of the American Statistical Association}, 90(432),
-1257--1270.
-
-Scott, D.W. (1992) \emph{Multivariate Density Estimation: Theory,
-Practice, and Visualization}. New York: Wiley.
-
-Sheather, S.J. and Jones, M.C. (1991) A reliable data-based bandwidth
-selection method for kernel density estimation.
-\emph{Journal of the Royal Statistical Society Series B}, 53(3),
-683--690.
-
-Silverman, B.W. (1986) \emph{Density Estimation for Statistics and Data
+Silverman, B. W. (1986) \emph{Density Estimation for Statistics and Data
 Analysis}. London: Chapman & Hall.
 
-Sim, N. and Zhou, H. (2015) Oil prices, US stock return and the
-dependence between their quantiles.
-\emph{Journal of Banking & Finance}, 55, 1--8.
-
-Yu, K. and Jones, M.C. (1998) Local linear quantile regression.
+Yu, K. and Jones, M. C. (1998) Local linear quantile regression.
 \emph{Journal of the American Statistical Association}, 93(441),
-228--237.
+228--237. \doi{10.1080/01621459.1998.10474104}
 }
 \seealso{
-\code{\link{summary.qqr}}, \code{\link{print.qqr}},
-\code{\link{plot.qqr}}, \code{\link{Int.plot}},
-\code{\link{surface3d}}, \code{\link{panel_surface}},
-\code{\link{qqr_surface}}, \code{\link{rowave.qqr}},
-\code{\link{compare.qqr}}, \code{\link{excel.qqr}},
-\code{\link{word.qqr}}
+\code{\link{summary.qqr}}, \code{\link{qqr_surface}},
+\code{\link{compare.qqr}}, \code{\link{surface3d}},
+\code{\link{qqr_heatmap}}, \code{\link{excel.qqr}}
 }

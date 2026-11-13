@@ -79,22 +79,13 @@ This summary is useful when a compact measure of the average effect of
 each coefficient across the conditional quantile spectrum is required.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n  <- 200
-x  <- rnorm(n)
-y  <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat, m = 15)
-
-# Row means for the quantile regressor, including grid values
-row_x <- rowave.qqr(fit, coef = "x", digits = 4)
-
-# Row means for all coefficients, with grid_value suppressed
-row_all <- rowave.qqr(fit, coef = "all", digits = 4,
-                      include_grid_value = FALSE)
-}
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+rowave.qqr(fit, coef = "x", digits = 3)
+rowave.qqr(fit, coef = "all", include_grid_value = FALSE)
 
 }
 \seealso{

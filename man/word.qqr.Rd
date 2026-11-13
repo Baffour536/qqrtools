@@ -72,31 +72,15 @@ This function requires the \pkg{officer} and \pkg{flextable} packages
 to be installed.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n  <- 200
-x  <- rnorm(n)
-y  <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat, m = 15)
-
-# Export coefficients and p-values for the quantile regressor,
-# including grid values
-word.qqr(fit,
-         file              = "QQR_x_coef_pval.docx",
-         coef              = "x",
-         which             = "both",
-         digits            = 4,
-         include_grid_value = TRUE)
-
-# Export a compact version without the Grid_Value column
-word.qqr(fit,
-         file              = "QQR_x_coef_pval_compact.docx",
-         coef              = "x",
-         which             = "both",
-         digits            = 4,
-         include_grid_value = FALSE)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("officer", quietly = TRUE) &&
+    requireNamespace("flextable", quietly = TRUE)) {
+  word.qqr(fit, file = tempfile(fileext = ".docx"), coef = "x",
+           which = "coef_stars", digits = 3)
 }
 
 }

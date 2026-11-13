@@ -50,6 +50,17 @@ returned by \code{\link{compare.qqr}}. The sheet is named
 \code{coef_<coefficient_name>}, truncated to 31 characters to
 comply with Excel's sheet name length limit.
 }
+\examples{
+set.seed(1)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("openxlsx", quietly = TRUE)) {
+  excel.compare.qqr(fit, file = tempfile(fileext = ".xlsx"), coef = "all")
+}
+
+}
 \seealso{
 \code{\link{compare.qqr}}, \code{\link{word.compare.qqr}},
 \code{\link{excel.qqr}}

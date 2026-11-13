@@ -55,6 +55,17 @@ Produces a \pkg{ggplot2} line plot comparing standard quantile
 regression (QR) coefficients with averaged QQR coefficients for a
 selected regressor, with quantile levels on the x-axis.
 }
+\examples{
+set.seed(1)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("ggplot2", quietly = TRUE)) {
+  plot.compare.qqr(fit)
+}
+
+}
 \seealso{
 \code{\link{compare.qqr}}, \code{\link{plot.qqr}}
 }

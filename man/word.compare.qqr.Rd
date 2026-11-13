@@ -44,10 +44,23 @@ for selected regressors, using \pkg{officer} and \pkg{flextable}.
 }
 \details{
 For each requested coefficient, the function inserts a short heading
-and a table with three columns (\code{tau}, \code{qr},
-\code{qqr_mean}) into the Word document. This layout is convenient
+and a table with the columns returned by \code{\link{compare.qqr}}
+(\code{tau}, \code{qr}, \code{qqr_mean}, \code{difference}) into the
+Word document. This layout is convenient
 for reproducing the typical empirical comparison of QR and average
 QQR coefficients across quantiles.
+}
+\examples{
+set.seed(1)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("officer", quietly = TRUE) &&
+    requireNamespace("flextable", quietly = TRUE)) {
+  word.compare.qqr(fit, file = tempfile(fileext = ".docx"), digits = 3)
+}
+
 }
 \seealso{
 \code{\link{compare.qqr}}, \code{\link{word.qqr}},

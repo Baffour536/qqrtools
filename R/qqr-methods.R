@@ -40,24 +40,21 @@ print.qqr <- function(x, ...) {
     cat("Control variables   : ", paste(x$controls, collapse = ", "), "\n")
   cat("Intercept           : ", if (isTRUE(x$intercept)) "yes" else "no", "\n")
   cat("Observations        : ", x$n, "\n")
-  cat("Grid points (m)     : ", length(x$grid), "\n")
+  grid_type <- if (is.null(x$grid_type)) "range" else x$grid_type
+  kspace    <- if (is.null(x$kernel_space)) "x" else x$kernel_space
+  cat("Grid points (m)     : ", length(x$grid),
+      if (grid_type == "quantile") "(empirical quantiles of the regressor)"
+      else "(equally spaced over the regressor range)", "\n")
   cat("Quantile levels     : ", paste(x$taus, collapse = " "), "\n")
-  cat("Kernel              : ", x$kernel, "\n")
+  cat("Kernel              : ", x$kernel,
+      if (kspace == "cdf") "on F_n(x) - theta" else "on x - grid value", "\n")
   cat("SE type             : ", x$se_type, "\n")
-  ## Bandwidth
-  h_lab <- switch(
-    x$h_method,
-    silverman = "Silverman's rule",
-    robust    = "Robust rule",
-    iqr       = "IQR-based rule",
-    cv        = "Cross-validation (LOO)",
-    manual    = "Manual (user-supplied)",
-    x$h_method
-  )
-  cat(sprintf("Bandwidth h         :  %.6f  [%s]\n", x$bandwidth, h_lab))
+  cat(sprintf("Bandwidth h         :  %.6g  [%s]\n", x$bandwidth,
+              .qqr_h_label(x$h_method)))
   if (!is.null(x$h_method) && x$h_method == "manual")
-    cat("  ** Manual h may introduce specification bias.",
-        "Consider h = 'silverman' or 'robust'. **\n")
+    cat("  ** Manual bandwidth: report it and check sensitivity. **\n")
+  if (!is.null(x$n_failed) && x$n_failed > 0L)
+    cat("Failed local fits   : ", x$n_failed, "(cells are NA)\n")
   cat(strrep("-", 50L), "\n")
   invisible(x)
 }
@@ -88,7 +85,10 @@ print.qqr <- function(x, ...) {
 #'         \eqn{i, j};
 #'   \item the overall mean and standard deviation of the slope values;
 #'   \item row means (averages over \eqn{\tau_j} for each grid location);
-#'   \item column means (averages over \eqn{z_i} for each quantile level).
+#'   \item column means (averages over the grid for each quantile level
+#'         \eqn{\tau_j}; with \code{grid = "quantile"} these are the
+#'         \eqn{\theta}-averaged QQR slopes of Sim and Zhou, 2015, that
+#'         \code{\link{compare.qqr}} sets against standard QR).
 #' }
 #' These summaries are useful for characterising the overall strength and
 #' variability of the quantile-on-quantile relationship.
@@ -128,6 +128,10 @@ summary.qqr <- function(object, ...) {
     intercept   = object$intercept,
     taus        = object$taus,
     grid_range  = range(object$grid, na.rm = TRUE),
+    thetas      = .qqr_thetas(object),
+    grid_type   = if (is.null(object$grid_type)) "range" else object$grid_type,
+    kernel_space = if (is.null(object$kernel_space)) "x" else
+      object$kernel_space,
     beta_min    = min(beta,            na.rm = TRUE),
     beta_max    = max(beta,            na.rm = TRUE),
     beta_mean   = mean(beta,           na.rm = TRUE),
@@ -190,18 +194,11 @@ print.summary.qqr <- function(x, digits = 4, ...) {
   cat("Kernel              : ", x$kernel, "\n")
   cat("SE type             : ", x$se_type, "\n")
   cat(strrep("-", 55L), "\n")
+  if (!is.null(x$grid_type))
+    cat("Grid / kernel space : ", x$grid_type, "/", x$kernel_space, "\n")
   ## Bandwidth block
-  h_lab <- switch(
-    x$h_method,
-    silverman = "Silverman rule of thumb",
-    robust    = "Robust rule of thumb",
-    iqr       = "IQR-based rule",
-    cv        = "Leave-one-out cross-validation",
-    manual    = "Manual (user-supplied)",
-    x$h_method
-  )
-  cat(sprintf("Bandwidth (h)       :  %s\n", fmt(x$bandwidth)))
-  cat(sprintf("Selection method    :  %s\n", h_lab))
+  cat(sprintf("Bandwidth (h)       :  %s\n", format(signif(x$bandwidth, 6L))))
+  cat(sprintf("Selection method    :  %s\n", .qqr_h_label(x$h_method)))
   if (!is.null(x$h_details))
     cat("Details             : ", x$h_details, "\n")
   if (!is.null(x$h_method) && x$h_method == "manual")
@@ -265,6 +262,14 @@ print.summary.qqr <- function(x, digits = 4, ...) {
 #'
 #' @method plot qqr
 #'
+#' @examples
+#' set.seed(1)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' plot(fit, coef = "x", engine = "base", theta = 40)
+#'
 #' @export
 #' @rawNamespace export(plot.qqr)
 plot.qqr <- function(x,
@@ -277,27 +282,23 @@ plot.qqr <- function(x,
   what   <- match.arg(what)
   engine <- match.arg(engine)
 
-  surf_name <- .qqr_match_coef(x, coef)
+  zmat <- .qqr_get_surface(x, coef, what)
 
-  zmat <- if (what == "coef") {
-    x$coef_surfaces[[surf_name]]
-  } else {
-    x$pval_surfaces[[surf_name]]
-  }
-
-  x_axis <- seq(0.05, 0.95, length.out = nrow(zmat))
+  x_axis <- .qqr_thetas(x)
   y_axis <- x$taus
+  if (length(unique(x_axis)) < length(x_axis) || length(y_axis) < 2L)
+    stop("A 3D surface needs at least two distinct grid quantiles and two ",
+         "taus.", call. = FALSE)
 
   zlab <- if (what == "coef") "Coefficient" else "p-value"
   main <- paste0("QQR ", zlab, " surface: ",
                  x$dependent, " on ", coef)
 
-  xlab <- paste0("Independent quantile (", coef, ")")
-  ylab <- "Dependent quantile (tau)"
+  xlab <- paste0("Quantile of ", x$independent, " (theta)")
+  ylab <- paste0("Quantile of ", x$dependent, " (tau)")
 
   if (engine == "plot3D" && requireNamespace("plot3D", quietly = TRUE)) {
-    persp3D_fn <- get("persp3D", envir = asNamespace("plot3D"))
-    persp3D_fn(
+    plot3D::persp3D(
       x = x_axis,
       y = y_axis,
       z = zmat,
@@ -370,20 +371,13 @@ plot.qqr <- function(x,
 #' \code{\link{qqr}}, \code{\link{plot.qqr}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n  <- 200
-#' x  <- rnorm(n)
-#' y  <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat, m = 15)
-#'
-#' # Interactive coefficient surface
-#' Int.plot(fit, coef = "x", what = "coef", add_plane = TRUE, plane_z = 0)
-#'
-#' # Interactive p-value surface with 5% reference plane
-#' Int.plot(fit, coef = "x", what = "pvalue", add_plane = TRUE, plane_z = 0.05)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (interactive() && requireNamespace("rgl", quietly = TRUE)) {
+#'   Int.plot(fit, coef = "x", add_plane = TRUE, plane_z = 0)
 #' }
 #'
 #' @export
@@ -410,23 +404,17 @@ Int.plot.qqr <- function(x,
 
   what <- match.arg(what)
 
-  surf_name <- .qqr_match_coef(x, coef)
+  zmat <- .qqr_get_surface(x, coef, what)
 
-  zmat <- if (what == "coef") {
-    x$coef_surfaces[[surf_name]]
-  } else {
-    x$pval_surfaces[[surf_name]]
-  }
-
-  x_axis <- seq(0.05, 0.95, length.out = nrow(zmat))
+  x_axis <- .qqr_thetas(x)
   y_axis <- x$taus
 
   zlab <- if (what == "coef") "Coefficient" else "p-value"
   main <- paste0("QQR ", zlab, " surface: ",
                  x$dependent, " on ", coef)
 
-  xlab <- paste0("Independent quantile (", coef, ")")
-  ylab <- "Dependent quantile (tau)"
+  xlab <- paste0("Quantile of ", x$independent, " (theta)")
+  ylab <- paste0("Quantile of ", x$dependent, " (tau)")
 
   d     <- expand.grid(x = x_axis, y = y_axis)
   z_vec <- as.vector(zmat)
@@ -531,12 +519,11 @@ Int.plot.qqr <- function(x,
 #'   \code{\link[graphics]{persp}}.
 #'
 #' @details
-#' For each requested coefficient, the function extracts the row mean of
-#' the corresponding surface (averaging over all conditional quantile
-#' levels \code{taus}) and plots it as a flat coloured ribbon spanning
-#' the quantile grid. The ribbons are arranged side-by-side, with the
-#' variable names on the x-axis, quantile levels on the y-axis, and
-#' coefficient values on the z-axis.
+#' For each requested coefficient the full \eqn{m \times K} surface is
+#' drawn with \code{\link[graphics]{persp}} in its own panel (x-axis: grid
+#' quantiles \eqn{\theta} of the quantile regressor; y-axis: \eqn{\tau};
+#' z-axis: coefficient or p-value). The panels are placed side by side and
+#' share one colour scale and one z-range.
 #'
 #' Colour is mapped to the coefficient value using the chosen palette and
 #' a shared scale across all panels so that magnitudes are visually
@@ -556,29 +543,14 @@ Int.plot.qqr <- function(x,
 #' \code{\link{qqr}}, \code{\link{plot.qqr}}, \code{\link{Int.plot}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' z1  <- rnorm(n)
-#' z2  <- rnorm(n)
-#' y   <- 0.5 + x * qnorm(runif(n)) + 0.3 * z1 - 0.2 * z2
-#' dat <- data.frame(y = y, x = x, z1 = z1, z2 = z2)
-#'
-#' fit <- qqr(y ~ x + z1 + z2, data = dat, qvar = "x",
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19)
-#'
-#' # Default plot - all coefficients
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
 #' panel_surface(fit)
-#'
-#' # Selected coefficients with custom palette and zero plane
-#' panel_surface(fit,
-#'               coef           = c("x", "z1", "z2"),
-#'               palette        = "RdBu",
-#'               add_zero_plane = TRUE,
-#'               theta          = -40,
-#'               phi            = 30)
-#' }
+#' panel_surface(fit, coef = c("x", "w"), palette = "RdBu",
+#'               add_zero_plane = TRUE)
 #'
 #' @export
 panel_surface <- function(x, ...) {
@@ -620,25 +592,11 @@ panel_surface.qqr <- function(x,
   # ---------------------------------------------------------------------------
   # 1.  Resolve which coefficients to plot
   # ---------------------------------------------------------------------------
-  # Build the full ordered list: intercept first, then focal, then controls
-  user_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent,
-    x$controls
-  )
-
   if (is.null(coef)) {
-    coef <- user_coefs
+    coef <- names(x$coef_surfaces)
   } else {
-    coef <- vapply(coef, function(cn) {
-      if (tolower(cn) %in% c("intercept", "(intercept)")) {
-        if ("(Intercept)" %in% user_coefs) return("(Intercept)")
-      }
-      if (!(cn %in% user_coefs))
-        stop("Coefficient '", cn, "' not found in model. Available: ",
-             paste(user_coefs, collapse = ", "))
-      cn
-    }, character(1L))
+    coef <- vapply(coef, function(cn) .qqr_match_coef(x, cn), character(1L),
+                   USE.NAMES = FALSE)
   }
 
   n_coef <- length(coef)
@@ -744,11 +702,13 @@ panel_surface.qqr <- function(x,
     cn    <- coef[k]
     z_mat <- surfaces[[cn]]    # [m x J] matrix
 
-    # x-axis for this panel: 1..m  (grid point indices)
-    # y-axis: tau levels (shared across all panels)
+    # x-axis: grid quantiles theta; y-axis: tau levels (shared)
     m_pts  <- nrow(z_mat)
-    x_axis <- seq_len(m_pts)
+    x_axis <- .qqr_thetas(x)
     y_axis <- taus
+    if (m_pts < 2L || length(taus) < 2L)
+      stop("panel_surface() needs at least two grid points and two taus.",
+           call. = FALSE)
 
     # -- Compute face colours using the SHARED palette -----------------------
     # persp() colours the (m-1) x (J-1) faces.
@@ -786,8 +746,8 @@ panel_surface.qqr <- function(x,
       expand   = expand,
       shade    = shade,
       border   = border,
-      xlab     = "Grid",
-      ylab     = "Quantiles",
+      xlab     = "theta",
+      ylab     = "tau",
       zlab     = zlab,
       main     = cn,          # panel title = coefficient name
       cex.main = cex_names,   # user-controlled size for the panel title
@@ -953,36 +913,14 @@ panel_surface.qqr <- function(x,
 #' \code{\link{panel_surface}}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' z1  <- rnorm(n)
-#' y   <- 0.5 + x * qnorm(runif(n)) + 0.3 * z1
-#' dat <- data.frame(y = y, x = x, z1 = z1)
-#'
-#' fit <- qqr(y ~ x + z1, data = dat, qvar = "x",
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19)
-#'
-#' # Plot coefficient surface for the quantile regressor
-#' surface3d(fit, coef = "x")
-#'
-#' # Plot with fixed colour limits and zero plane
-#' surface3d(fit, coef = "x",
-#'           clim           = c(-2, 2),
-#'           add_zero_plane = TRUE,
-#'           palette        = "RdBu",
-#'           theta          = 45,
-#'           phi            = 30)
-#'
-#' # Plot p-value surface
-#' surface3d(fit, coef = "x", what = "pvalue",
-#'           clim    = c(0, 1),
-#'           palette = "YlGnBu")
-#'
-#' # Plot control variable surface
-#' surface3d(fit, coef = "z1", palette = "plasma")
-#' }
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' surface3d(fit)
+#' surface3d(fit, palette = "RdBu", add_zero_plane = TRUE, theta = 40)
+#' surface3d(fit, what = "pvalue", clim = c(0, 1), palette = "YlGnBu")
 #'
 #' @export
 surface3d <- function(x, ...) {
@@ -1024,46 +962,26 @@ surface3d.qqr <- function(x,
 
   what <- match.arg(what)
 
-  ## Resolve coefficient name
-  user_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent,
-    x$controls
-  )
+  ## Resolve coefficient name and extract the raw m x K surface
+  coef     <- .qqr_match_coef(x, coef)
+  surf_mat <- .qqr_get_surface(x, coef, what)
+  if (nrow(surf_mat) < 2L || ncol(surf_mat) < 2L)
+    stop("surface3d() needs at least two grid points and two taus.",
+         call. = FALSE)
+  if (all(!is.finite(surf_mat)))
+    stop("The surface contains no finite values.", call. = FALSE)
 
-  if (tolower(coef) %in% c("intercept", "(intercept)")) {
-    coef <- "(Intercept)"
-  }
-
-  if (!(coef %in% user_coefs)) {
-    stop(
-      "Coefficient '", coef, "' not found. ",
-      "Available coefficients: ",
-      paste(user_coefs, collapse = ", ")
-    )
-  }
-
-  ## -----------------------------------------------------------------------
-  ## Extract the raw coefficient surface  (m x K matrix)
-  ## -----------------------------------------------------------------------
-  surf_mat <- if (what == "coef") {
-    x$coef_surfaces[[coef]]
-  } else {
-    x$pval_surfaces[[coef]]
-  }
-
-  if (is.null(surf_mat))
-    stop("Surface for coefficient '", coef, "' not found in the qqr object.")
-
-  ## x-axis: quantile grid of the quantile regressor (m points)
-  x_axis <- seq(0.05, 0.95, length.out = nrow(surf_mat))
-
-  ## y-axis: conditional quantile levels (taus)
+  ## x-axis: quantile levels theta of the grid points; y-axis: taus
+  x_axis <- .qqr_thetas(x)
   y_axis <- x$taus
 
   ## -----------------------------------------------------------------------
   ## Colour mapping
   ## -----------------------------------------------------------------------
+  if (!is.null(clim) &&
+      (!is.numeric(clim) || length(clim) != 2L || !(clim[1L] < clim[2L])))
+    stop("'clim' must be a numeric vector c(min, max) with min < max.",
+         call. = FALSE)
   z_min <- if (!is.null(clim)) clim[1L] else min(surf_mat, na.rm = TRUE)
   z_max <- if (!is.null(clim)) clim[2L] else max(surf_mat, na.rm = TRUE)
 
@@ -1113,7 +1031,7 @@ surface3d.qqr <- function(x,
     zlab <- if (what == "coef") "Coefficient" else "P-value"
 
   if (is.null(xlab))
-    xlab <- paste0("Quantile of ", coef)
+    xlab <- paste0("Quantile of ", x$independent, " (theta)")
 
   if (is.null(main))
     main <- paste0(
@@ -1252,32 +1170,74 @@ surface3d.qqr <- function(x,
   )
 }
 
-## Map any palette name string to a plotly-compatible colorscale value
-.qqr_colorscale <- function(palette, diverging_palettes) {
-  viridis_opts <- c("viridis", "plasma", "magma", "inferno",
-                    "cividis", "mako", "rocket", "turbo")
-  if (palette == "RdBu")
+## Map a palette name to an explicit plotly colorscale, always ordered from
+## the lowest value (position 0) to the highest (position 1), so that no
+## "reversescale" is needed. For "RdBu" (and other blue-red diverging
+## palettes) negative values are blue and positive values red.
+##   - "RdBu": the hand-coded ColorBrewer scale above;
+##   - any grDevices::hcl.pals() name (case-insensitive), e.g. "viridis",
+##     "plasma", "YlOrRd", "BrBG": built from grDevices::hcl.colors();
+##   - anything else (e.g. "Jet", "Hot", "Portland") is passed to plotly
+##     as a built-in colorscale name.
+## @noRd
+.qqr_colorscale <- function(palette, diverging_palettes = .qqr_diverging()) {
+  if (is.list(palette)) return(palette)
+  if (!is.character(palette) || length(palette) != 1L)
+    stop("'palette' must be a single character string.", call. = FALSE)
+  if (palette %in% c("RdBu", "RdBu_r"))
     return(.qqr_rdbu())
-  if (tolower(palette) %in% viridis_opts)
-    return(tools::toTitleCase(tolower(palette)))
-  return(palette)   ## pass through: "Jet", "Spectral", "Blues", "YlOrRd", etc.
+  pals <- grDevices::hcl.pals()
+  hit  <- pals[tolower(pals) == tolower(palette)]
+  if (length(hit)) {
+    cols <- grDevices::hcl.colors(11L, palette = hit[1L])
+    ## hcl.colors() returns red-to-blue for "RdYlBu"-type diverging
+    ## palettes; flip those so that low = blue, high = red.
+    if (hit[1L] %in% c("RdYlBu", "RdBu", "RdYlGn", "Spectral", "RdGy"))
+      cols <- rev(cols)
+    pos <- seq(0, 1, length.out = length(cols))
+    return(lapply(seq_along(cols), function(i) list(pos[i], cols[i])))
+  }
+  palette
 }
 
 ## Canonical list of diverging palette names recognised by this package
+## @noRd
 .qqr_diverging <- function() {
   c("RdBu", "BrBG", "PiYG", "PRGn", "PuOr",
     "RdGy", "RdYlBu", "RdYlGn", "Spectral",
-    "BlueRed", "RdBu_r")
+    "BlueRed", "RdBu_r", "Blue-Red", "Blue-Red 2", "Blue-Red 3",
+    "Red-Green", "Purple-Green", "Purple-Brown", "Green-Brown",
+    "Tropic", "Cork", "Vik", "Berlin", "Lisbon", "Tofino", "Broc")
 }
 
-## Match a user-supplied coefficient name to an available surface name
-.qqr_match_coef <- function(x, coef) {
-  all_names <- names(x$coef_surfaces)
-  if (coef %in% all_names) return(coef)
-  if (tolower(coef) %in% c("intercept", "(intercept)") &&
-      "(Intercept)" %in% all_names) return("(Intercept)")
-  stop("Coefficient '", coef, "' not recognised. Available: ",
-       paste(all_names, collapse = ", "))
+## Resolve a "coef" argument that may be NULL (focal regressor), "all", or
+## one or more coefficient names. Returns stored surface names.
+## @noRd
+.qqr_resolve_coefs <- function(x, coef, allow_all = TRUE) {
+  if (is.null(coef)) return(.qqr_match_coef(x, x$independent))
+  if (allow_all && length(coef) == 1L && identical(tolower(coef), "all"))
+    return(names(x$coef_surfaces))
+  vapply(coef, function(cn) .qqr_match_coef(x, cn), character(1L),
+         USE.NAMES = FALSE)
+}
+
+## Colour limits, optionally symmetric around zero.
+## @noRd
+.qqr_zlim <- function(vals, clim, center_zero) {
+  if (!is.null(clim)) {
+    if (!is.numeric(clim) || length(clim) != 2L || !(clim[1L] < clim[2L]))
+      stop("'clim' must be a numeric vector c(min, max) with min < max.",
+           call. = FALSE)
+    lim <- clim
+  } else {
+    vals <- vals[is.finite(vals)]
+    if (!length(vals))
+      stop("The surface contains no finite values to plot.", call. = FALSE)
+    lim <- range(vals)
+  }
+  if (isTRUE(center_zero)) lim <- c(-1, 1) * max(abs(lim))
+  if (lim[1L] == lim[2L]) lim <- lim + c(-0.5, 0.5)
+  lim
 }
 
 
@@ -1436,47 +1396,20 @@ surface3d.qqr <- function(x,
 #'   between their quantiles. \emph{Journal of Banking & Finance}, 55, 1--8.
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' z1  <- rnorm(n)
-#' y   <- x * qnorm(runif(n)) + 0.3 * z1
-#' dat <- data.frame(y = y, x = x, z1 = z1)
-#'
-#' fit <- qqr(y ~ x + z1, data = dat, qvar = "x",
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-#'
-#' ## Basic heatmap -- focal regressor, RdBu palette centred at zero
-#' qqr_heatmap(fit)
-#'
-#' ## Stars overlay: cells significant at 1 %, 5 %, and 10 % are labelled
-#' qqr_heatmap(fit, sig_overlay = "stars")
-#'
-#' ## Dots overlay: any significant cell gets a bullet (white text on dark bg)
-#' qqr_heatmap(fit, sig_overlay = "dots", sig_colour = "white",
-#'             palette = "Viridis")
-#'
-#' ## P-value surface with sequential palette, no zero-centering
-#' qqr_heatmap(fit, what = "pvalue", palette = "YlOrRd",
-#'             center_zero = FALSE)
-#'
-#' ## All coefficients in a subplot grid, shared colour scale
-#' qqr_heatmap(fit, coef = "all", palette = "RdBu",
-#'             sig_overlay = "stars")
-#'
-#' ## Fix colour limits for comparing two models side-by-side
-#' qqr_heatmap(fit, clim = c(-1.5, 1.5))
-#'
-#' ## Grid index on x-axis instead of actual z_i values
-#' qqr_heatmap(fit, grid_values = FALSE)
-#'
-#' ## Save as self-contained interactive HTML
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("plotly", quietly = TRUE)) {
+#'   qqr_heatmap(fit)
+#'   qqr_heatmap(fit, sig_overlay = "stars")
+#'   qqr_heatmap(fit, coef = "all")
+#' }
+#' \dontrun{
 #' p <- qqr_heatmap(fit, sig_overlay = "stars")
 #' htmlwidgets::saveWidget(p, "heatmap.html", selfcontained = TRUE)
-#'
-#' ## Save as static PNG (requires kaleido)
-#' ## Install once: reticulate::py_install("kaleido")
+#' ## Static PNG (requires the Python 'kaleido' package)
 #' qqr_heatmap(fit, snapshot = TRUE, snapshot_file = "heatmap.png")
 #' }
 #'
@@ -1510,47 +1443,24 @@ qqr_heatmap <- function(x,
   sig_overlay <- match.arg(sig_overlay)
 
   ## -- 1. Resolve coefficient(s) ---------------------------------------------
-  all_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent,
-    x$controls
-  )
-  if (is.null(coef) || identical(coef, x$independent)) {
-    plot_coefs <- x$independent
-  } else if (identical(tolower(coef), "all")) {
-    plot_coefs <- all_coefs
-  } else {
-    bad <- setdiff(coef, all_coefs)
-    if (length(bad))
-      stop("Coefficient(s) not recognised: ", paste(bad, collapse = ", "),
-           ". Available: ", paste(all_coefs, collapse = ", "))
-    plot_coefs <- coef
-  }
+  plot_coefs <- .qqr_resolve_coefs(x, coef, allow_all = TRUE)
 
   ## -- 2. Surface list -------------------------------------------------------
-  surfaces <- if (what == "coef") x$coef_surfaces else x$pval_surfaces
-  if (is.null(surfaces))
-    stop("No ", what, " surfaces found.",
-         if (what == "pvalue") " Re-fit with se_type != 'none'." else "")
+  surfaces <- stats::setNames(
+    lapply(plot_coefs, function(cn) .qqr_get_surface(x, cn, what)),
+    plot_coefs)
+  if (sig_overlay != "none")
+    for (cn in plot_coefs) .qqr_get_surface(x, cn, "pvalue")
 
   ## -- 3. Shared colour limits -----------------------------------------------
   diverging_palettes <- .qqr_diverging()
-  is_diverging       <- palette %in% diverging_palettes
+  is_diverging       <- is.character(palette) &&
+    palette %in% diverging_palettes
   if (is.null(center_zero))
     center_zero <- (what == "coef" && is_diverging)
 
-  all_vals <- unlist(lapply(plot_coefs, function(cn) {
-    v <- surfaces[[cn]]; v[is.finite(v)]
-  }))
-  if (!is.null(clim)) {
-    z_min <- clim[1L]; z_max <- clim[2L]
-  } else {
-    z_min <- min(all_vals); z_max <- max(all_vals)
-  }
-  if (center_zero) {
-    z_abs <- max(abs(c(z_min, z_max)))
-    z_min <- -z_abs; z_max <- z_abs
-  }
+  lim   <- .qqr_zlim(unlist(surfaces), clim, center_zero)
+  z_min <- lim[1L]; z_max <- lim[2L]
 
   ## -- 4. Axis labels --------------------------------------------------------
   ## Option C: x = z_i (regressor grid), y = tau (outcome quantile)
@@ -1580,9 +1490,6 @@ qqr_heatmap <- function(x,
     ## Significance annotations
     anns <- list()
     if (sig_overlay != "none") {
-      if (is.null(x$pval_surfaces))
-        stop("sig_overlay requires p-value surfaces. ",
-             "Re-fit with se_type != 'none'.")
       pmat <- x$pval_surfaces[[cn]]
       for (i in seq_len(m)) {
         for (j in seq_along(x$taus)) {
@@ -1616,7 +1523,6 @@ qqr_heatmap <- function(x,
         z             = z_plot,
         type          = "heatmap",
         colorscale    = cs,
-        reversescale  = is_diverging,
         showscale     = TRUE,
         zmin          = z_min,
         zmax          = z_max,
@@ -1823,42 +1729,18 @@ qqr_heatmap <- function(x,
 #'   between their quantiles. \emph{Journal of Banking & Finance}, 55, 1--8.
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' y   <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat,
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-#'
-#' ## Basic filled contour with bold zero contour
-#' qqr_contour(fit)
-#'
-#' ## More contour levels for finer resolution
-#' qqr_contour(fit, n_levels = 20L)
-#'
-#' ## Grey out non-significant regions (p > 0.05)
-#' qqr_contour(fit, sig_mask = TRUE, sig_threshold = 0.05)
-#'
-#' ## Fixed colour limits for comparing two models
-#' qqr_contour(fit, clim = c(-1.5, 1.5))
-#'
-#' ## P-value contour -- shows where the effect is significant
-#' qqr_contour(fit, what = "pvalue", palette = "YlOrRd",
-#'             center_zero = FALSE, zero_contour = FALSE)
-#'
-#' ## Suppress inline labels for a cleaner figure
-#' qqr_contour(fit, show_labels = FALSE)
-#'
-#' ## Save as self-contained HTML
-#' p <- qqr_contour(fit, sig_mask = TRUE)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("plotly", quietly = TRUE)) {
+#'   qqr_contour(fit)
+#'   qqr_contour(fit, sig_mask = TRUE, sig_threshold = 0.05)
+#' }
+#' \dontrun{
+#' p <- qqr_contour(fit)
 #' htmlwidgets::saveWidget(p, "contour.html", selfcontained = TRUE)
-#'
-#' ## Save as PNG (requires kaleido)
-#' ## Install once: reticulate::py_install("kaleido")
-#' qqr_contour(fit, snapshot = TRUE, snapshot_file = "contour.png")
 #' }
 #'
 #' @export
@@ -1891,29 +1773,15 @@ qqr_contour <- function(x,
   what <- match.arg(what)
 
   ## -- 1. Resolve coefficient ------------------------------------------------
-  all_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent, x$controls
-  )
-  if (is.null(coef)) {
-    coef <- x$independent
-  } else {
-    coef <- coef[1L]
-    if (tolower(coef) %in% c("intercept", "(intercept)"))
-      coef <- "(Intercept)"
-    if (!(coef %in% all_coefs))
-      stop("Coefficient '", coef, "' not recognised. Available: ",
-           paste(all_coefs, collapse = ", "))
-  }
+  coef <- .qqr_resolve_coefs(x, if (is.null(coef)) NULL else coef[1L],
+                             allow_all = FALSE)
 
   ## -- 2. Extract surface ----------------------------------------------------
-  surfaces <- if (what == "coef") x$coef_surfaces else x$pval_surfaces
-  if (is.null(surfaces))
-    stop("No ", what, " surfaces found.",
-         if (what == "pvalue") " Re-fit with se_type != 'none'." else "")
-
-  mat <- surfaces[[coef]]   ## m x J
+  mat <- .qqr_get_surface(x, coef, what)   ## m x J
   m   <- nrow(mat)
+  if (m < 2L || ncol(mat) < 2L)
+    stop("qqr_contour() needs at least two grid points and two taus.",
+         call. = FALSE)
 
   ## Option C: x = grid (z_i),  y = tau
   x_vals <- if (grid_values) round(x$grid, digits) else seq_len(m)
@@ -1922,20 +1790,13 @@ qqr_contour <- function(x,
 
   ## -- 3. Colour limits ------------------------------------------------------
   diverging_palettes <- .qqr_diverging()
-  is_diverging       <- palette %in% diverging_palettes
+  is_diverging       <- is.character(palette) &&
+    palette %in% diverging_palettes
   if (is.null(center_zero))
     center_zero <- (what == "coef" && is_diverging)
 
-  vals <- mat[is.finite(mat)]
-  if (!is.null(clim)) {
-    z_min <- clim[1L]; z_max <- clim[2L]
-  } else {
-    z_min <- min(vals); z_max <- max(vals)
-  }
-  if (center_zero) {
-    z_abs <- max(abs(c(z_min, z_max)))
-    z_min <- -z_abs; z_max <- z_abs
-  }
+  lim   <- .qqr_zlim(mat, clim, center_zero)
+  z_min <- lim[1L]; z_max <- lim[2L]
 
   contour_size <- (z_max - z_min) / max(n_levels, 2L)
   cs           <- .qqr_colorscale(palette, diverging_palettes)
@@ -1956,7 +1817,6 @@ qqr_contour <- function(x,
     z             = z_plot,
     type          = "contour",
     colorscale    = cs,
-    reversescale  = is_diverging,
     showscale     = TRUE,
     zmin          = z_min,
     zmax          = z_max,
@@ -2001,10 +1861,7 @@ qqr_contour <- function(x,
 
   ## -- 7. Significance mask --------------------------------------------------
   if (sig_mask) {
-    if (is.null(x$pval_surfaces))
-      stop("sig_mask requires p-value surfaces. ",
-           "Re-fit with se_type != 'none'.")
-    pmat     <- x$pval_surfaces[[coef]]
+    pmat     <- .qqr_get_surface(x, coef, "pvalue")
     mask_mat <- t(ifelse(!is.na(pmat) & pmat > sig_threshold, 0.5, NA_real_))
 
     p <- p |>
@@ -2192,50 +2049,19 @@ qqr_contour <- function(x,
 #'   \url{https://plotly-r.com}
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' y   <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat,
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-#'
-#' ## 3-D surface -- default Viridis palette, rotate interactively
-#' qqr_plotly(fit, type = "surface")
-#'
-#' ## 3-D surface -- RdBu with zero plane to mark sign changes
-#' qqr_plotly(fit, type = "surface", colorscale = "RdBu",
-#'            show_zero_plane = TRUE, center_zero = TRUE)
-#'
-#' ## 3-D surface -- Jet palette, custom camera angle and aspect ratio
-#' qqr_plotly(fit, type = "surface", colorscale = "Jet",
-#'            camera = list(eye = list(x = 2, y = 1, z = 1)),
-#'            aspect_ratio = c(1, 1, 0.5))
-#'
-#' ## 2-D heatmap with significance annotations at 5 %
-#' qqr_plotly(fit, type = "heatmap", colorscale = "RdBu",
-#'            sig_overlay = TRUE, sig_threshold = 0.05,
-#'            sig_symbol = "o")
-#'
-#' ## 2-D contour with 20 levels, inline labels, and zero contour
-#' qqr_plotly(fit, type = "contour", colorscale = "Viridis",
-#'            n_contours = 20L, show_labels = TRUE)
-#'
-#' ## P-value surface as a heatmap
-#' qqr_plotly(fit, what = "pvalue", type = "heatmap",
-#'            colorscale = "Plasma", clim = c(0, 1))
-#'
-#' ## Save 3-D surface as self-contained HTML
-#' p <- qqr_plotly(fit, type = "surface", colorscale = "RdBu",
-#'                 show_zero_plane = TRUE)
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("plotly", quietly = TRUE)) {
+#'   qqr_plotly(fit, type = "surface")
+#'   qqr_plotly(fit, type = "heatmap", colorscale = "RdBu", sig_overlay = TRUE)
+#'   qqr_plotly(fit, type = "contour")
+#' }
+#' \dontrun{
+#' p <- qqr_plotly(fit, type = "surface", show_zero_plane = TRUE)
 #' htmlwidgets::saveWidget(p, "surface.html", selfcontained = TRUE)
-#'
-#' ## Save as PNG (requires kaleido)
-#' ## Install once: reticulate::py_install("kaleido")
-#' qqr_plotly(fit, type = "heatmap", snapshot = TRUE,
-#'            snapshot_file = "heatmap.png")
 #' }
 #'
 #' @export
@@ -2276,29 +2102,15 @@ qqr_plotly <- function(x,
   type <- match.arg(type)
 
   ## -- 1. Resolve coefficient ------------------------------------------------
-  all_coefs <- c(
-    if (isTRUE(x$intercept)) "(Intercept)" else character(0L),
-    x$independent, x$controls
-  )
-  if (is.null(coef)) {
-    coef <- x$independent
-  } else {
-    coef <- coef[1L]
-    if (tolower(coef) %in% c("intercept", "(intercept)"))
-      coef <- "(Intercept)"
-    if (!(coef %in% all_coefs))
-      stop("Coefficient '", coef, "' not recognised. Available: ",
-           paste(all_coefs, collapse = ", "))
-  }
+  coef <- .qqr_resolve_coefs(x, if (is.null(coef)) NULL else coef[1L],
+                             allow_all = FALSE)
 
   ## -- 2. Extract surface ----------------------------------------------------
-  surfaces <- if (what == "coef") x$coef_surfaces else x$pval_surfaces
-  if (is.null(surfaces))
-    stop("No ", what, " surfaces found.",
-         if (what == "pvalue") " Re-fit with se_type != 'none'." else "")
-
-  mat <- surfaces[[coef]]   ## m x J  (rows = grid/X,  cols = tau/Y)
+  mat <- .qqr_get_surface(x, coef, what)   ## m x J (rows = grid, cols = tau)
   m   <- nrow(mat)
+  if (m < 2L || ncol(mat) < 2L)
+    stop("qqr_plotly() needs at least two grid points and two taus.",
+         call. = FALSE)
 
   ## Option C: x = grid (z_i),  y = tau (J)
   x_vals <- if (grid_values) round(x$grid, digits) else seq_len(m)
@@ -2306,19 +2118,12 @@ qqr_plotly <- function(x,
 
   ## -- 3. Colour limits ------------------------------------------------------
   diverging_cs <- .qqr_diverging()
+  is_div <- is.character(colorscale) && colorscale %in% diverging_cs
   if (is.null(center_zero))
-    center_zero <- (what == "coef" && colorscale %in% diverging_cs)
+    center_zero <- (what == "coef" && is_div)
 
-  vals <- mat[is.finite(mat)]
-  if (!is.null(clim)) {
-    z_min <- clim[1L]; z_max <- clim[2L]
-  } else {
-    z_min <- min(vals); z_max <- max(vals)
-  }
-  if (center_zero) {
-    z_abs <- max(abs(c(z_min, z_max)))
-    z_min <- -z_abs; z_max <- z_abs
-  }
+  lim   <- .qqr_zlim(mat, clim, center_zero)
+  z_min <- lim[1L]; z_max <- lim[2L]
 
   ## -- 4. Labels -------------------------------------------------------------
   if (is.null(xlab)) xlab <- if (grid_values)
@@ -2335,7 +2140,7 @@ qqr_plotly <- function(x,
                     x$dependent, " ~ ", coef)
   }
 
-  cs <- if (colorscale == "RdBu") .qqr_rdbu() else colorscale
+  cs <- .qqr_colorscale(colorscale)
 
   hover_tmpl <- paste0(
     xlab,    ": %{x:.", digits,     "f}<br>",
@@ -2351,8 +2156,10 @@ qqr_plotly <- function(x,
   if (type == "surface") {
 
     z_surf <- t(mat)
-    x_step <- if (length(x_vals) > 1L) round(diff(x_vals)[1L], digits) else 0.05
-    y_step <- if (length(y_vals) > 1L) round(diff(y_vals)[1L], digits) else 0.05
+    ## Spacing of the wire-frame lines; the quantile grid is generally not
+    ## equally spaced in x, so use the average spacing.
+    x_step <- (max(x_vals) - min(x_vals)) / (length(x_vals) - 1L)
+    y_step <- (max(y_vals) - min(y_vals)) / (length(y_vals) - 1L)
 
     p <- plotly::plot_ly(
       x             = x_vals,
@@ -2428,7 +2235,6 @@ qqr_plotly <- function(x,
       z             = t(mat),
       type          = "heatmap",
       colorscale    = cs,
-      reversescale  = (colorscale %in% diverging_cs),
       showscale     = TRUE,
       zmin          = z_min,
       zmax          = z_max,
@@ -2440,10 +2246,7 @@ qqr_plotly <- function(x,
     )
 
     if (sig_overlay) {
-      if (is.null(x$pval_surfaces))
-        stop("sig_overlay = TRUE requires p-value surfaces. ",
-             "Re-fit with se_type != 'none'.")
-      pmat <- x$pval_surfaces[[coef]]
+      pmat <- .qqr_get_surface(x, coef, "pvalue")
       anns <- list()
       for (i in seq_len(m)) {
         for (j in seq_along(x$taus)) {
@@ -2491,7 +2294,6 @@ qqr_plotly <- function(x,
       z             = t(mat),
       type          = "contour",
       colorscale    = cs,
-      reversescale  = (colorscale %in% diverging_cs),
       showscale     = TRUE,
       zmin          = z_min,
       zmax          = z_max,
@@ -2562,19 +2364,23 @@ qqr_plotly <- function(x,
 
 ## Internal computation helpers (not exported) --------------------------------
 
+## Somers' D(Y|X) = (C - D) / (number of pairs not tied on X)
+##                = (C - D) / (C + D + T_Y),
+## where T_Y counts pairs tied on Y but not on X (Somers, 1962).
+## @noRd
 .qqr_somers_d <- function(y, x) {
   ok <- is.finite(x) & is.finite(y); x <- x[ok]; y <- y[ok]
   n  <- length(x)
   if (n < 2L) return(NA_real_)
-  C <- 0L; D <- 0L; TX <- 0L
+  C <- 0; D <- 0; TY <- 0
   for (i in seq_len(n - 1L)) {
     dx <- x[(i+1L):n] - x[i]; dy <- y[(i+1L):n] - y[i]
     C  <- C  + sum(dx * dy > 0)
     D  <- D  + sum(dx * dy < 0)
-    TX <- TX + sum(dx == 0 & dy != 0)
+    TY <- TY + sum(dy == 0 & dx != 0)
   }
-  denom <- C + D + TX
-  if (denom == 0L) return(NA_real_)
+  denom <- C + D + TY
+  if (denom == 0) return(NA_real_)
   (C - D) / denom
 }
 
@@ -2612,7 +2418,8 @@ qqr_plotly <- function(x,
                                    method = "pearson"),
          blomqvist    = .qqr_blomqvist(y_cell, x_cell),
          coexceedance = {
-           if (any(is.null(c(q_x_lo, q_y_lo, full_y, full_x))))
+           if (is.null(q_x_lo) || is.null(q_y_lo) || is.null(full_y) ||
+               is.null(full_x))
              stop("coexceedance requires q_x_lo, q_y_lo, full_y, full_x.")
            .qqr_coexceedance(full_y, full_x, q_x_lo, q_y_lo)
          },
@@ -2640,22 +2447,24 @@ qqr_plotly <- function(x,
 #'     robust than Spearman when cell sizes are small or ties are present.
 #'     Range \eqn{[-1, 1]}.}
 #'   \item{\code{"somers_d"}}{Somers' \eqn{D(Y|X)}: an asymmetric rank
-#'     association measure \eqn{(C - D) / (C + D + T_X)}, where \eqn{C}
-#'     is concordant pairs, \eqn{D} discordant, and \eqn{T_X} pairs tied on
-#'     \eqn{X}.  Directional: \eqn{D(Y|X) \neq D(X|Y)}, which directly
-#'     mirrors QQR's own causal structure.  Range \eqn{[-1, 1]}.}
+#'     association measure \eqn{(C - D) / (C + D + T_Y)}, where \eqn{C}
+#'     is concordant pairs, \eqn{D} discordant, and \eqn{T_Y} pairs tied on
+#'     \eqn{Y} but not on \eqn{X} (so the denominator counts all pairs not
+#'     tied on \eqn{X}).  Directional: \eqn{D(Y|X) \neq D(X|Y)} when there
+#'     are ties.  Range \eqn{[-1, 1]}.}
 #'   \item{\code{"pearson"}}{Pearson linear correlation within each cell.
 #'     Assumes approximate linearity; rank-based measures are generally
 #'     preferable in small cells.  Range \eqn{[-1, 1]}.}
 #'   \item{\code{"blomqvist"}}{Blomqvist's \eqn{\beta} (medial correlation).
 #'     Uses only the signs of deviations from cell medians, making it
 #'     extremely robust for very small cells.  Range \eqn{[-1, 1]}.}
-#'   \item{\code{"coexceedance"}}{Co-exceedance probability.  For each cell
-#'     defined by lower-boundary thresholds
-#'     \eqn{(Q_X(\tau_i),\, Q_Y(\tau_j))}, computes
-#'     \eqn{P(X \geq Q_X(\tau_i),\; Y \geq Q_Y(\tau_j))} over the full
-#'     sample.  Widely used for joint tail events in financial contagion
-#'     research.  Range \eqn{[0, 1]}.}
+#'   \item{\code{"coexceedance"}}{Co-exceedance probability.  For each pair
+#'     of levels \eqn{(\tau_i, \tau_j)} it computes the empirical joint
+#'     exceedance probability
+#'     \eqn{P(X \geq \hat Q_X(\tau_i),\; Y \geq \hat Q_Y(\tau_j))} over the
+#'     full sample (not within cells; \code{mode} is ignored).  Under
+#'     independence it is approximately \eqn{(1-\tau_i)(1-\tau_j)}.
+#'     Range \eqn{[0, 1]}.}
 #' }
 #'
 #' @details
@@ -2689,9 +2498,11 @@ qqr_plotly <- function(x,
 #'
 #' \strong{Independence benchmark (co-exceedance).}
 #' When \code{method = "coexceedance"} and \code{independence_line = TRUE},
-#' a dashed contour is drawn at the theoretical independence level
-#' \eqn{(1 - \tau_i)(1 - \tau_j)}.  Cells above this level exhibit
-#' positive tail dependence; cells below indicate negative tail dependence.
+#' a dashed contour marks where the observed co-exceedance equals the
+#' independence benchmark \eqn{(1 - \tau_i)(1 - \tau_j)}.  The returned
+#' list also contains \code{independence}, the benchmark matrix, so that
+#' \code{result$matrix - result$independence} gives the excess joint
+#' exceedance (positive values indicate positive dependence).
 #'
 #' \strong{Saving output.}
 #' \itemize{
@@ -2827,59 +2638,17 @@ qqr_plotly <- function(x,
 #'   variables. \emph{American Sociological Review}, 27(6), 799--811.
 #'
 #' @examples
-#' \dontrun{
 #' set.seed(1)
-#' n   <- 300
-#' x   <- rnorm(n)
-#' y   <- x * qnorm(runif(n))
-#' dat <- data.frame(y = y, x = x)
-#'
-#' fit <- qqr(y ~ x, data = dat,
-#'            taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-#'
-#' ## Default: Spearman subsample heatmap
-#' result <- qqr_cor_heatmap(fit)
-#' result$plot      ## display the plotly figure
-#' result$matrix    ## access the raw dependence matrix as a numeric matrix
-#'
-#' ## Somers' D -- directional, mirrors QQR structure most closely
-#' qqr_cor_heatmap(fit, method = "somers_d")$plot
-#'
-#' ## Blomqvist's beta -- most robust for small cells
-#' qqr_cor_heatmap(fit, method = "blomqvist")$plot
-#'
-#' ## Kendall's tau -- robust alternative to Spearman
-#' qqr_cor_heatmap(fit, method = "kendall")$plot
-#'
-#' ## Co-exceedance with independence benchmark contour
-#' qqr_cor_heatmap(fit, method = "coexceedance",
-#'                 independence_line = TRUE)$plot
-#'
-#' ## Binary mode -- replicates the Roudane (2026) approach
-#' qqr_cor_heatmap(fit, method = "spearman", mode = "binary")$plot
-#'
-#' ## Coarser 9 x 9 grid (useful for small samples)
-#' qqr_cor_heatmap(fit, n_bins = 9L)$plot
-#'
-#' ## Fixed colour limits for cross-variable comparison
-#' qqr_cor_heatmap(fit, clim = c(-1, 1))$plot
-#'
-#' ## Suppress cell annotations for a cleaner look on fine grids
-#' qqr_cor_heatmap(fit, annotate = FALSE)$plot
-#'
-#' ## Access and inspect the dependence matrix
-#' res <- qqr_cor_heatmap(fit, method = "somers_d")
-#' print(res)           ## console summary (method, mode, range, NA count)
-#' heatmap(res$matrix)  ## base-R heatmap of the raw matrix
-#'
-#' ## Save as self-contained interactive HTML
-#' htmlwidgets::saveWidget(res$plot, "dep_heatmap.html",
-#'                         selfcontained = TRUE)
-#'
-#' ## Save as PNG (requires kaleido)
-#' ## Install once: reticulate::py_install("kaleido")
-#' qqr_cor_heatmap(fit, snapshot = TRUE,
-#'                 snapshot_file = "dep_heatmap.png")
+#' dat <- data.frame(x = rnorm(150), w = rnorm(150))
+#' dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+#' fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+#'            taus = c(0.25, 0.5, 0.75), m = 5)
+#' if (requireNamespace("plotly", quietly = TRUE)) {
+#'   res <- qqr_cor_heatmap(fit)
+#'   res
+#'   round(res$matrix, 2)
+#'   ce <- qqr_cor_heatmap(fit, method = "coexceedance")
+#'   round(ce$matrix - ce$independence, 3)
 #' }
 #'
 #' @export
@@ -2949,11 +2718,10 @@ qqr_cor_heatmap <- function(x,
     ## Case (a): honour the user's fit taus exactly
     tau_mids <- x$taus                        ## e.g. 0.05, 0.10 ... 0.95
     n_bins   <- length(tau_mids)
-    ## Bin boundaries: midpoints between consecutive taus, clamped to [0,1]
-    mids_ext <- c(0, tau_mids, 1)
-    probs    <- (mids_ext[-length(mids_ext)] + mids_ext[-1L]) / 2
-    probs    <- c(probs[1L], probs[-1L])      ## keep 0 as first break
-    probs[length(probs)] <- 1                 ## force last break = 1
+    if (n_bins < 2L)
+      stop("The fit has a single tau; supply n_bins (>= 2).", call. = FALSE)
+    ## Bin boundaries: 0, midpoints between consecutive taus, 1
+    probs <- c(0, (tau_mids[-1L] + tau_mids[-n_bins]) / 2, 1)
   } else {
     ## Case (b): custom grid size, uniform spacing
     n_bins   <- as.integer(n_bins)
@@ -2979,7 +2747,14 @@ qqr_cor_heatmap <- function(x,
   rownames(dep_mat) <- paste0(x_name, "_Q", round(tau_mids, 2))
   colnames(dep_mat) <- paste0(y_name, "_Q", round(tau_mids, 2))
 
-  if (mode == "subsample") {
+  if (method == "coexceedance") {
+    ## Full-sample joint exceedance of the tau-quantiles (mode ignored)
+    x_q <- stats::quantile(x_raw, probs = tau_mids, names = FALSE)
+    y_q <- stats::quantile(y_raw, probs = tau_mids, names = FALSE)
+    for (i in seq_len(n_bins))
+      for (j in seq_len(n_bins))
+        dep_mat[i, j] <- .qqr_coexceedance(y_raw, x_raw, x_q[i], y_q[j])
+  } else if (mode == "subsample") {
     x_bin <- pmax(1L, pmin(n_bins,
                            findInterval(x_raw, x_breaks,
                                         rightmost.closed = TRUE)))
@@ -2993,13 +2768,11 @@ qqr_cor_heatmap <- function(x,
         cell_n[i, j]  <- nc
         if (nc < min_cell_n) { dep_mat[i, j] <- NA_real_; next }
         x_cell <- x_raw[in_cell]; y_cell <- y_raw[in_cell]
-        dep_mat[i, j] <- if (method == "coexceedance") {
-          .qqr_cell_stat(y_cell, x_cell, method,
-                         q_x_lo = x_breaks[i], q_y_lo = y_breaks[j],
-                         full_y = y_raw, full_x = x_raw)
-        } else {
-          .qqr_cell_stat(y_cell, x_cell, method)
+        ## Constant cells (e.g. ties) have no defined correlation
+        if (length(unique(x_cell)) < 2L || length(unique(y_cell)) < 2L) {
+          dep_mat[i, j] <- NA_real_; next
         }
+        dep_mat[i, j] <- .qqr_cell_stat(y_cell, x_cell, method)
       }
     }
   } else {
@@ -3031,16 +2804,8 @@ qqr_cor_heatmap <- function(x,
   if (is.null(center_zero))
     center_zero <- !is_sequential
 
-  vals <- dep_mat[is.finite(dep_mat)]
-  if (!is.null(clim)) {
-    z_min <- clim[1L]; z_max <- clim[2L]
-  } else {
-    z_min <- min(vals, na.rm = TRUE); z_max <- max(vals, na.rm = TRUE)
-  }
-  if (center_zero && !is_sequential) {
-    z_abs <- max(abs(c(z_min, z_max)))
-    z_min <- -z_abs; z_max <- z_abs
-  }
+  lim    <- .qqr_zlim(dep_mat, clim, center_zero && !is_sequential)
+  z_min  <- lim[1L]; z_max <- lim[2L]
   z_span <- z_max - z_min
 
   ## -- 6. Labels -------------------------------------------------------------
@@ -3075,7 +2840,8 @@ qqr_cor_heatmap <- function(x,
                     x_name, " vs ", y_name)
   if (is.null(subtitle))
     subtitle <- paste0(method_labels[method], "  |  ",
-                       mode_labels[mode], "  |  ",
+                       if (method == "coexceedance") "full sample"
+                       else mode_labels[mode], "  |  ",
                        n_bins, " \u00d7 ", n_bins, " grid")
 
   ## -- 7. Cell annotations ---------------------------------------------------
@@ -3114,9 +2880,7 @@ qqr_cor_heatmap <- function(x,
   }
 
   ## -- 8. Colour scale -------------------------------------------------------
-  cs           <- .qqr_colorscale(palette, .qqr_diverging())
-  is_diverging <- palette %in% .qqr_diverging()
-  rev_scale    <- (is_diverging && palette != "RdBu")
+  cs <- .qqr_colorscale(palette, .qqr_diverging())
 
   ## -- 9. Main heatmap -------------------------------------------------------
   p <- plotly::plot_ly(
@@ -3125,7 +2889,6 @@ qqr_cor_heatmap <- function(x,
     z             = t(dep_mat),
     type          = "heatmap",
     colorscale    = cs,
-    reversescale  = rev_scale,
     showscale     = TRUE,
     zmin          = z_min,
     zmax          = z_max,
@@ -3142,17 +2905,20 @@ qqr_cor_heatmap <- function(x,
 
   ## -- 10. Independence benchmark contour (coexceedance only) ----------------
   if (method == "coexceedance" && independence_line) {
+    ## Dashed line where the observed co-exceedance equals the
+    ## independence benchmark (1 - tau_i)(1 - tau_j): excess = 0.
     ind_mat <- outer(1 - tau_mids, 1 - tau_mids, FUN = "*")
+    excess  <- dep_mat - ind_mat
     p <- p |>
       plotly::add_contour(
         x          = x_tick_vals,
         y          = y_tick_vals,
-        z          = t(ind_mat),
+        z          = t(excess),
         showscale  = FALSE,
         contours   = list(
-          start      = min(ind_mat),
-          end        = max(ind_mat),
-          size       = (max(ind_mat) - min(ind_mat)) / 8,
+          start      = 0,
+          end        = 0,
+          size       = 1,
           showlabels = FALSE,
           coloring   = "lines"
         ),
@@ -3209,7 +2975,9 @@ qqr_cor_heatmap <- function(x,
     y_breaks = y_breaks,
     cell_n   = cell_n,
     method   = method,
-    mode     = mode
+    mode     = if (method == "coexceedance") "full sample" else mode,
+    independence = if (method == "coexceedance")
+      outer(1 - tau_mids, 1 - tau_mids, FUN = "*") else NULL
   )
   class(result) <- c("qqr_cor_heatmap", "list")
   result
@@ -3256,15 +3024,17 @@ print.qqr_cor_heatmap <- function(x, ...) {
   cat("Grid   :", nrow(x$matrix), "x", ncol(x$matrix),
       "bins  (rows = X quantile, cols = Y quantile)\n")
   vals <- x$matrix[is.finite(x$matrix)]
-  cat(sprintf("Range  : [%.4f, %.4f]   mean = %.4f\n",
-              min(vals), max(vals), mean(vals)))
+  if (length(vals))
+    cat(sprintf("Range  : [%.4f, %.4f]   mean = %.4f\n",
+                min(vals), max(vals), mean(vals)))
   n_na <- sum(!is.finite(x$matrix))
   if (n_na > 0L)
-    cat("NA cells:", n_na, "(fewer than min_cell_n observations)\n")
+    cat("NA cells:", n_na,
+        "(too few or constant observations in the cell)\n")
   cat(strrep("-", 50L), "\n")
-  cat("$plot    ? plotly figure\n")
-  cat("$matrix  ? raw dependence matrix (numeric)\n")
-  cat("$cell_n  ? observations per cell (subsample mode only)\n")
+  cat("$plot    -> plotly figure\n")
+  cat("$matrix  -> raw dependence matrix (numeric)\n")
+  cat("$cell_n  -> observations per cell (subsample mode only)\n")
   cat("Save HTML : htmlwidgets::saveWidget($plot, 'dep_heatmap.html')\n")
   cat("Save PNG  : plotly::save_image($plot, 'dep_heatmap.png')\n")
   invisible(x)

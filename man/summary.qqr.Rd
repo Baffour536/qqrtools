@@ -51,7 +51,10 @@ regressions;
 \eqn{i, j};
 \item the overall mean and standard deviation of the slope values;
 \item row means (averages over \eqn{\tau_j} for each grid location);
-\item column means (averages over \eqn{z_i} for each quantile level).
+\item column means (averages over the grid for each quantile level
+\eqn{\tau_j}; with \code{grid = "quantile"} these are the
+\eqn{\theta}-averaged QQR slopes of Sim and Zhou, 2015, that
+\code{\link{compare.qqr}} sets against standard QR).
 }
 These summaries are useful for characterising the overall strength and
 variability of the quantile-on-quantile relationship.

@@ -167,22 +167,24 @@ Range \eqn{[-1, 1]}.}
 robust than Spearman when cell sizes are small or ties are present.
 Range \eqn{[-1, 1]}.}
 \item{\code{"somers_d"}}{Somers' \eqn{D(Y|X)}: an asymmetric rank
-association measure \eqn{(C - D) / (C + D + T_X)}, where \eqn{C}
-is concordant pairs, \eqn{D} discordant, and \eqn{T_X} pairs tied on
-\eqn{X}.  Directional: \eqn{D(Y|X) \neq D(X|Y)}, which directly
-mirrors QQR's own causal structure.  Range \eqn{[-1, 1]}.}
+association measure \eqn{(C - D) / (C + D + T_Y)}, where \eqn{C}
+is concordant pairs, \eqn{D} discordant, and \eqn{T_Y} pairs tied on
+\eqn{Y} but not on \eqn{X} (so the denominator counts all pairs not
+tied on \eqn{X}).  Directional: \eqn{D(Y|X) \neq D(X|Y)} when there
+are ties.  Range \eqn{[-1, 1]}.}
 \item{\code{"pearson"}}{Pearson linear correlation within each cell.
 Assumes approximate linearity; rank-based measures are generally
 preferable in small cells.  Range \eqn{[-1, 1]}.}
 \item{\code{"blomqvist"}}{Blomqvist's \eqn{\beta} (medial correlation).
 Uses only the signs of deviations from cell medians, making it
 extremely robust for very small cells.  Range \eqn{[-1, 1]}.}
-\item{\code{"coexceedance"}}{Co-exceedance probability.  For each cell
-defined by lower-boundary thresholds
-\eqn{(Q_X(\tau_i),\, Q_Y(\tau_j))}, computes
-\eqn{P(X \geq Q_X(\tau_i),\; Y \geq Q_Y(\tau_j))} over the full
-sample.  Widely used for joint tail events in financial contagion
-research.  Range \eqn{[0, 1]}.}
+\item{\code{"coexceedance"}}{Co-exceedance probability.  For each pair
+of levels \eqn{(\tau_i, \tau_j)} it computes the empirical joint
+exceedance probability
+\eqn{P(X \geq \hat Q_X(\tau_i),\; Y \geq \hat Q_Y(\tau_j))} over the
+full sample (not within cells; \code{mode} is ignored).  Under
+independence it is approximately \eqn{(1-\tau_i)(1-\tau_j)}.
+Range \eqn{[0, 1]}.}
 }
 }
 \details{
@@ -216,9 +218,11 @@ cells motivates the full QQR analysis.
 
 \strong{Independence benchmark (co-exceedance).}
 When \code{method = "coexceedance"} and \code{independence_line = TRUE},
-a dashed contour is drawn at the theoretical independence level
-\eqn{(1 - \tau_i)(1 - \tau_j)}.  Cells above this level exhibit
-positive tail dependence; cells below indicate negative tail dependence.
+a dashed contour marks where the observed co-exceedance equals the
+independence benchmark \eqn{(1 - \tau_i)(1 - \tau_j)}.  The returned
+list also contains \code{independence}, the benchmark matrix, so that
+\code{result$matrix - result$independence} gives the excess joint
+exceedance (positive values indicate positive dependence).
 
 \strong{Saving output.}
 \itemize{
@@ -233,59 +237,17 @@ the subsample mode and all six dependence measures are original
 contributions of this package.
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-y   <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat,
-           taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-
-## Default: Spearman subsample heatmap
-result <- qqr_cor_heatmap(fit)
-result$plot      ## display the plotly figure
-result$matrix    ## access the raw dependence matrix as a numeric matrix
-
-## Somers' D -- directional, mirrors QQR structure most closely
-qqr_cor_heatmap(fit, method = "somers_d")$plot
-
-## Blomqvist's beta -- most robust for small cells
-qqr_cor_heatmap(fit, method = "blomqvist")$plot
-
-## Kendall's tau -- robust alternative to Spearman
-qqr_cor_heatmap(fit, method = "kendall")$plot
-
-## Co-exceedance with independence benchmark contour
-qqr_cor_heatmap(fit, method = "coexceedance",
-                independence_line = TRUE)$plot
-
-## Binary mode -- replicates the Roudane (2026) approach
-qqr_cor_heatmap(fit, method = "spearman", mode = "binary")$plot
-
-## Coarser 9 x 9 grid (useful for small samples)
-qqr_cor_heatmap(fit, n_bins = 9L)$plot
-
-## Fixed colour limits for cross-variable comparison
-qqr_cor_heatmap(fit, clim = c(-1, 1))$plot
-
-## Suppress cell annotations for a cleaner look on fine grids
-qqr_cor_heatmap(fit, annotate = FALSE)$plot
-
-## Access and inspect the dependence matrix
-res <- qqr_cor_heatmap(fit, method = "somers_d")
-print(res)           ## console summary (method, mode, range, NA count)
-heatmap(res$matrix)  ## base-R heatmap of the raw matrix
-
-## Save as self-contained interactive HTML
-htmlwidgets::saveWidget(res$plot, "dep_heatmap.html",
-                        selfcontained = TRUE)
-
-## Save as PNG (requires kaleido)
-## Install once: reticulate::py_install("kaleido")
-qqr_cor_heatmap(fit, snapshot = TRUE,
-                snapshot_file = "dep_heatmap.png")
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("plotly", quietly = TRUE)) {
+  res <- qqr_cor_heatmap(fit)
+  res
+  round(res$matrix, 2)
+  ce <- qqr_cor_heatmap(fit, method = "coexceedance")
+  round(ce$matrix - ce$independence, 3)
 }
 
 }

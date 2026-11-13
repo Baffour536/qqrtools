@@ -179,50 +179,19 @@ crosses from positive to negative territory.  Adjust opacity with
 }
 }
 \examples{
-\dontrun{
 set.seed(1)
-n   <- 300
-x   <- rnorm(n)
-y   <- x * qnorm(runif(n))
-dat <- data.frame(y = y, x = x)
-
-fit <- qqr(y ~ x, data = dat,
-           taus = seq(0.05, 0.95, by = 0.05), m = 19L)
-
-## 3-D surface -- default Viridis palette, rotate interactively
-qqr_plotly(fit, type = "surface")
-
-## 3-D surface -- RdBu with zero plane to mark sign changes
-qqr_plotly(fit, type = "surface", colorscale = "RdBu",
-           show_zero_plane = TRUE, center_zero = TRUE)
-
-## 3-D surface -- Jet palette, custom camera angle and aspect ratio
-qqr_plotly(fit, type = "surface", colorscale = "Jet",
-           camera = list(eye = list(x = 2, y = 1, z = 1)),
-           aspect_ratio = c(1, 1, 0.5))
-
-## 2-D heatmap with significance annotations at 5 \%
-qqr_plotly(fit, type = "heatmap", colorscale = "RdBu",
-           sig_overlay = TRUE, sig_threshold = 0.05,
-           sig_symbol = "o")
-
-## 2-D contour with 20 levels, inline labels, and zero contour
-qqr_plotly(fit, type = "contour", colorscale = "Viridis",
-           n_contours = 20L, show_labels = TRUE)
-
-## P-value surface as a heatmap
-qqr_plotly(fit, what = "pvalue", type = "heatmap",
-           colorscale = "Plasma", clim = c(0, 1))
-
-## Save 3-D surface as self-contained HTML
-p <- qqr_plotly(fit, type = "surface", colorscale = "RdBu",
-                show_zero_plane = TRUE)
+dat <- data.frame(x = rnorm(150), w = rnorm(150))
+dat$y <- 1 + dat$x + 0.5 * dat$w + (1 + 0.3 * abs(dat$x)) * rnorm(150)
+fit <- qqr(y ~ x + w, data = dat, qvar = "x",
+           taus = c(0.25, 0.5, 0.75), m = 5)
+if (requireNamespace("plotly", quietly = TRUE)) {
+  qqr_plotly(fit, type = "surface")
+  qqr_plotly(fit, type = "heatmap", colorscale = "RdBu", sig_overlay = TRUE)
+  qqr_plotly(fit, type = "contour")
+}
+\dontrun{
+p <- qqr_plotly(fit, type = "surface", show_zero_plane = TRUE)
 htmlwidgets::saveWidget(p, "surface.html", selfcontained = TRUE)
-
-## Save as PNG (requires kaleido)
-## Install once: reticulate::py_install("kaleido")
-qqr_plotly(fit, type = "heatmap", snapshot = TRUE,
-           snapshot_file = "heatmap.png")
 }
 
 }
