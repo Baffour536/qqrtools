@@ -101,7 +101,10 @@ results <- lapply(seq_len(nrow(configs)), function(k) {
 })
 
 saveRDS(list(results = results, reps = R_REP, seed = SEED,
-             session = utils::sessionInfo()),
+             session = list(R = R.version.string,
+                            platform = R.version$platform,
+                            qqrtools = as.character(packageVersion("qqrtools")),
+                            quantreg = as.character(packageVersion("quantreg")))),
         "tools/validation/simulation_results.rds")
 
 ## ---- Markdown summary ---------------------------------------------------
